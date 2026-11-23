@@ -2,8 +2,10 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { HandshakeStrip } from '@/components/HandshakeStrip';
 import { MemberCapacitySidebar } from '@/components/MemberCapacitySidebar';
-import { Banner, buttonClass, errorText, formatDateTime, apiFetch, memberName, Modal, StatusPill } from '@/components/ui';
+import { ReceiptRail } from '@/components/ReceiptRail';
+import { Banner, buttonClass, Drawer, formatDateTime, memberName, StatusPill } from '@/components/ui';
 import {
   memberColorIndex,
   memberDotClass,
@@ -19,22 +21,24 @@ import { getWorkweekMonday } from '@/lib/seed';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function CalendarPage() {
-  const { db, error, refreshDb, currentUser } = usePersona();
+  const { db, error, currentUser } = usePersona();
   const [memberFilter, setMemberFilter] = useState<string>('all');
   const [weekOffset, setWeekOffset] = useState(0);
-  const [showPreviews, setShowPreviews] = useState(false);
+  const [showPreviews, setShowPreviews] = useState(true);
+  const [mobileDayIdx, setMobileDayIdx] = useState(() => {
+    const d = new Date().getDay();
+    return d >= 1 && d <= 5 ? d - 1 : 0;
+  });
   const [selected, setSelected] = useState<GridEvent | null>(null);
   const [selectedSpan, setSelectedSpan] = useState<TaskSpan | null>(null);
-  const [toggleError, setToggleError] = useState<string | null>(null);
-  const [toggling, setToggling] = useState(false);
 
   const members = useMemo(() => db?.members ?? [], [db]);
-  const simulateFailure = db?.settings.simulateCalendarFailure ?? false;
 
-  const { monday, weekEnd } = useMemo(() => {
+  const { monday, weekEnd, days } = useMemo(() => {
     const start = getWorkweekMonday(new Date());
     start.setDate(start.getDate() + weekOffset * 7);
-    return { monday: start, weekEnd: new Date(start.getTime() + 5 * DAY_MS) };
+    const list = Array.from({ length: 5 }, (_, i) => new Date(start.getTime() + i * DAY_MS));
+    return { monday: start, weekEnd: new Date(start.getTime() + 5 * DAY_MS), days: list };
   }, [weekOffset]);
 
   const visibleMemberIds = memberFilter === 'all' ? members.map((m) => m.id) : [memberFilter];
@@ -62,257 +66,311 @@ export default function CalendarPage() {
     );
   }, [db, showPreviews, monday, weekEnd]);
 
-  async function toggleFailure() {
-    setToggling(true);
-    setToggleError(null);
-    const result = await apiFetch('/api/calendar', {
-      method: 'PATCH',
-      body: { simulateCalendarFailure: !simulateFailure },
-    });
-    setToggling(false);
-    if (!result.ok) setToggleError(errorText(result));
-    await refreshDb();
-  }
-
   const exportHref =
-    memberFilter === 'all' ? '/api/calendar/export' : `/api/calendar/export?memberId=${encodeURIComponent(memberFilter)}`;
-  const selectedTask = selected?.taskId ? db?.tasks.find((t) => t.id === selected.taskId) : undefined;
-  const spanTask = selectedSpan ? db?.tasks.find((t) => t.id === selectedSpan.taskId) : undefined;
+    memberFilter === 'all'
+      ? '/api/calendar/export'
+      : `/api/calendar/export?memberId=${encodeURIComponent(memberFilter)}`;
+
+  const drawerTaskId = selected?.taskId ?? selectedSpan?.taskId;
+  const drawerTask = drawerTaskId ? db?.tasks.find((t) => t.id === drawerTaskId) : undefined;
+  const drawerAudit = drawerTaskId
+    ? (db?.auditLog.filter((e) => e.taskId === drawerTaskId) ?? [])
+    : [];
   const ownColor = currentUser ? memberColorIndex(members, currentUser.id) : 0;
+
+  // Mobile single-day agenda events
+  const activeMobileDay = days[mobileDayIdx] ?? days[0];
+  const mobileDayEvents = useMemo(() => {
+    if (!activeMobileDay) return [];
+    const start = new Date(activeMobileDay);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(activeMobileDay);
+    end.setHours(23, 59, 59, 999);
+    const visible = new Set(visibleMemberIds);
+    return events
+      .filter(
+        (e) =>
+          visible.has(e.memberId) &&
+          Date.parse(e.end) > start.getTime() &&
+          Date.parse(e.start) < end.getTime(),
+      )
+      .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  }, [activeMobileDay, events, visibleMemberIds]);
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">Shared Team Calendar</h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Meetings and confirmed work blocks. Work blocks appear only after both sides confirm.
+          <h1 className="text-xl font-bold tracking-tight text-[#111827]">Living Team Schedule</h1>
+          <p className="text-xs text-[#57534E]">
+            Week of{' '}
+            {monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}{' '}
+            · Solid blocks are mutually confirmed; dashed ghosts await a second signature.
           </p>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
-          {simulateFailure ? (
-            <span className="rounded-full bg-red-600 px-2.5 py-1 text-xs font-semibold text-white">
-              ⚠ Sync failure simulation ON
-            </span>
-          ) : null}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={simulateFailure}
-            onClick={toggleFailure}
-            disabled={toggling || !db}
-            className={simulateFailure ? buttonClass.danger : buttonClass.secondary}
-          >
-            Simulate Calendar Sync Failure: {simulateFailure ? 'ON' : 'OFF'}
-          </button>
+          <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-[#D1CCC2] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#111827]">
+            <input
+              type="checkbox"
+              checked={showPreviews}
+              onChange={(e) => setShowPreviews(e.target.checked)}
+              className="accent-[#111827]"
+            />
+            Pending Ghosts
+          </label>
+          <div className="inline-flex rounded-lg border border-[#D1CCC2] bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setWeekOffset((w) => w - 1)}
+              className="rounded-md px-2.5 py-1 text-xs font-semibold text-[#57534E] hover:bg-[#F7F6F2] hover:text-[#111827]"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              onClick={() => setWeekOffset(0)}
+              disabled={weekOffset === 0}
+              className="rounded-md px-2.5 py-1 text-xs font-semibold text-[#111827] hover:bg-[#F7F6F2] disabled:opacity-40"
+            >
+              This Week
+            </button>
+            <button
+              type="button"
+              onClick={() => setWeekOffset((w) => w + 1)}
+              className="rounded-md px-2.5 py-1 text-xs font-semibold text-[#57534E] hover:bg-[#F7F6F2] hover:text-[#111827]"
+            >
+              Next
+            </button>
+          </div>
           <a href={exportHref} download className={buttonClass.secondary}>
             Export .ics
           </a>
-          <button type="button" onClick={() => void refreshDb()} className={buttonClass.secondary}>
-            Refresh
-          </button>
         </div>
       </div>
 
       {error ? <Banner tone="error" title="Failed to load state">{error}</Banner> : null}
-      {toggleError ? <Banner tone="error">{toggleError}</Banner> : null}
-      {simulateFailure ? (
-        <Banner tone="warning" title="Calendar provider outage is being simulated">
-          New confirmations will end in <code>sync_failed</code>. Turn this off, then use{' '}
-          <strong>Retry Calendar Sync</strong> in the Inbox to recover.
-        </Banner>
-      ) : null}
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap gap-1 rounded-lg bg-slate-100 p-1" role="tablist" aria-label="Member filter">
-          {[{ id: 'all', label: 'All Team' }, ...members.map((m) => ({ id: m.id, label: `${m.name.split(' ')[0]} (${m.role})` }))].map(
-            (tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={memberFilter === tab.id}
-                onClick={() => setMemberFilter(tab.id)}
-                className={`rounded-md px-3 py-1 text-sm font-medium ${
-                  memberFilter === tab.id ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ),
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <label className="flex items-center gap-1.5 text-xs text-slate-600">
-            <input type="checkbox" checked={showPreviews} onChange={(e) => setShowPreviews(e.target.checked)} />
-            Show Pending Previews (dashed)
-          </label>
-          <button type="button" className={buttonClass.secondary} onClick={() => setWeekOffset((w) => w - 1)}>
-            ← Prev
-          </button>
-          <button type="button" className={buttonClass.secondary} onClick={() => setWeekOffset(0)} disabled={weekOffset === 0}>
-            Current Workweek
-          </button>
-          <button type="button" className={buttonClass.secondary} onClick={() => setWeekOffset((w) => w + 1)}>
-            Next →
-          </button>
-        </div>
-      </div>
 
       {db ? (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-            <span>
-              Week of {monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+          {/* Compact Legend */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-[#57534E]">
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`inline-block h-3 w-4 rounded-sm border ${OWN_MEETING_COLORS[ownColor]}`} />
+              Your meeting
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className={`inline-block h-3 w-4 rounded-sm border ${OWN_MEETING_COLORS[ownColor]}`} /> your meeting
+            <span className="inline-flex items-center gap-1.5">
+              <span className={`inline-block h-3 w-4 rounded-sm border ${OTHER_MEETING_COLOR}`} />
+              Team meeting
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className={`inline-block h-3 w-4 rounded-sm border ${OTHER_MEETING_COLOR}`} /> other meeting
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={`inline-block h-3 w-4 rounded-sm border-l-[3px] border-l-[#0F766E] bg-[#CCFBF1]`}
+              />
+              Confirmed work block
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span className={`inline-block h-3 w-4 rounded-sm ${currentUser ? memberDotClass(members, currentUser.id) : 'bg-indigo-600'}`} />{' '}
-              confirmed work block
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-3 w-4 rounded-sm border-2 border-dashed border-slate-500" /> pending preview (not on
-              calendar)
-            </span>
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-flex h-3 w-8 items-center justify-end rounded-sm border border-slate-400 border-r-4 border-r-slate-700 bg-slate-100" />
-              <span className="rounded bg-slate-700 px-1 text-[10px] font-bold text-white">⚑ 18:00</span> confirmed task span +
-              deadline
+            <span className="inline-flex items-center gap-1.5">
+              <span className="inline-block h-3 w-4 rounded-sm border-[1.5px] border-dashed border-[#047857] bg-[#ECFDF5]" />
+              Pending ghost (not booked)
             </span>
           </div>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
-            <WeekCalendarGrid
-              monday={monday}
+
+          {/* Mobile Single-Day Agenda (<768px) */}
+          <section className="space-y-3 md:hidden">
+            <div className="grid grid-cols-5 gap-1.5">
+              {days.map((day, idx) => (
+                <button
+                  key={day.toISOString()}
+                  type="button"
+                  onClick={() => setMobileDayIdx(idx)}
+                  className={`rounded-lg border py-1.5 text-center text-xs font-semibold ${
+                    mobileDayIdx === idx
+                      ? 'border-[#111827] bg-[#111827] text-white'
+                      : 'border-[#E5E2DC] bg-white text-[#57534E]'
+                  }`}
+                >
+                  {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                </button>
+              ))}
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-[#E5E2DC] bg-white p-3">
+              {mobileDayEvents.length === 0 ? (
+                <p className="py-4 text-center text-xs text-[#78716C]">
+                  No scheduled blocks for this day.
+                </p>
+              ) : (
+                mobileDayEvents.map((ev) => (
+                  <button
+                    key={ev.id}
+                    type="button"
+                    onClick={() => setSelected(ev)}
+                    className={`block w-full rounded-lg border px-3 py-2 text-left text-xs ${
+                      ev.kind === 'meeting'
+                        ? 'bg-hatch-meeting border-[#D1CCC2] text-[#57534E]'
+                        : ev.kind === 'work_block'
+                          ? 'border-[#5EEAD4] border-l-[3px] border-l-[#0F766E] bg-[#CCFBF1] text-[#111827]'
+                          : 'border-dashed border-[#047857] bg-[#ECFDF5] text-[#047857]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
+                      <span>
+                        {new Date(ev.start).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        })}
+                        –
+                        {new Date(ev.end).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        })}
+                      </span>
+                      <span>{memberName(members, ev.memberId)}</span>
+                    </div>
+                    <p className="mt-0.5 font-semibold">
+                      {ev.kind === 'preview' ? 'Pending: ' : ''}
+                      {ev.title.replace(/^Work:\s*/, '')}
+                    </p>
+                  </button>
+                ))
+              )}
+            </div>
+          </section>
+
+          {/* Desktop Week Grid + Interactive Capacity Sidebar */}
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_270px] lg:items-start">
+            <div className="hidden md:block">
+              <WeekCalendarGrid
+                monday={monday}
+                members={members}
+                visibleMemberIds={visibleMemberIds}
+                events={events}
+                tasks={db.tasks}
+                currentUserId={currentUser?.id}
+                onSelect={(ev) => {
+                  setSelectedSpan(null);
+                  setSelected(ev);
+                }}
+                onSelectSpan={(sp) => {
+                  setSelected(null);
+                  setSelectedSpan(sp);
+                }}
+              />
+            </div>
+            <MemberCapacitySidebar
               members={members}
-              visibleMemberIds={visibleMemberIds}
-              events={events}
-              tasks={db.tasks}
-              currentUserId={currentUser?.id}
-              onSelect={setSelected}
-              onSelectSpan={setSelectedSpan}
+              events={db.calendarEvents}
+              weekStart={monday}
+              weekEnd={weekEnd}
+              selectedMemberId={memberFilter}
+              onSelectMember={setMemberFilter}
             />
-            <MemberCapacitySidebar members={members} events={db.calendarEvents} weekStart={monday} weekEnd={weekEnd} />
           </div>
         </>
       ) : (
-        <p className="text-sm text-slate-500">Loading…</p>
+        <p className="text-xs text-[#78716C]">Loading calendar…</p>
       )}
 
-      {selected ? (
-        <Modal title={selected.title} onClose={() => setSelected(null)}>
-          <dl className="grid grid-cols-[110px_1fr] gap-y-1.5 text-sm">
-            <dt className="text-slate-500">Type</dt>
-            <dd>
-              {selected.kind === 'meeting'
-                ? 'Existing meeting'
+      {/* Slide-Over Task / Event Inspector Drawer */}
+      {selected || selectedSpan ? (
+        <Drawer
+          title={selected ? selected.title.replace(/^Work:\s*/, '') : selectedSpan!.title}
+          subtitle={
+            selected
+              ? selected.kind === 'meeting'
+                ? 'Scheduled Team Meeting'
                 : selected.kind === 'work_block'
-                  ? 'Confirmed task work block'
-                  : 'Pending preview — not written to the calendar yet'}
-            </dd>
-            {selected.kind === 'meeting' ? (
-              <>
-                <dt className="text-slate-500">Attendees ({(selected.attendeeIds ?? [selected.memberId]).length})</dt>
-                <dd>
-                  <ul className="space-y-0.5">
+                  ? 'Confirmed Task Work Block'
+                  : 'Pending Proposal Ghost — Not Yet Booked'
+              : 'Mutually Confirmed Task Span'
+          }
+          onClose={() => {
+            setSelected(null);
+            setSelectedSpan(null);
+          }}
+        >
+          <div className="space-y-4">
+            <dl className="grid grid-cols-[110px_1fr] gap-y-2 rounded-xl border border-[#E5E2DC] bg-white p-3.5 text-xs">
+              {selected?.kind === 'meeting' ? (
+                <>
+                  <dt className="text-[#78716C]">Attendees</dt>
+                  <dd className="space-y-1">
                     {(selected.attendeeIds ?? [selected.memberId]).map((id) => (
-                      <li key={id} className="flex items-center gap-1.5">
-                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${memberDotClass(members, id)}`} />
+                      <div key={id} className="flex items-center gap-1.5 font-medium text-[#111827]">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${memberDotClass(members, id)}`}
+                        />
                         {memberName(members, id)}
-                        {id === currentUser?.id ? <span className="text-xs text-slate-500">(you)</span> : null}
-                      </li>
+                        {id === currentUser?.id ? (
+                          <span className="text-[#78716C]">(you)</span>
+                        ) : null}
+                      </div>
                     ))}
-                  </ul>
-                </dd>
-              </>
-            ) : (
-              <>
-                <dt className="text-slate-500">Member</dt>
-                <dd>{memberName(members, selected.memberId)}</dd>
-              </>
-            )}
-            <dt className="text-slate-500">Time</dt>
-            <dd>
-              {formatDateTime(selected.start)} – {new Date(selected.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
-            </dd>
-            {selectedTask ? (
-              <>
-                <dt className="text-slate-500">Task</dt>
-                <dd className="font-medium">{selectedTask.title}</dd>
-                <dt className="text-slate-500">Status</dt>
-                <dd>
-                  <StatusPill status={selectedTask.status} />
-                </dd>
-                <dt className="text-slate-500">Assignee</dt>
-                <dd>{memberName(members, selectedTask.currentProposal.assigneeId)}</dd>
-                <dt className="text-slate-500">Version</dt>
-                <dd>
-                  {selectedTask.confirmedVersion ? `Confirmed v${selectedTask.confirmedVersion}` : 'Not confirmed'}
-                  {selectedTask.currentProposal.version !== selectedTask.confirmedVersion
-                    ? ` · current proposal v${selectedTask.currentProposal.version}`
-                    : ''}
-                </dd>
-                <dt className="text-slate-500">Deadline</dt>
-                <dd>{formatDateTime(selectedTask.currentProposal.deadline)}</dd>
-              </>
-            ) : null}
-          </dl>
-          {selected.taskId ? (
-            <div className="mt-4 flex gap-2">
-              <Link href="/inbox" className={buttonClass.secondary}>
-                Open in Inbox
-              </Link>
-              <Link href="/decisions" className={buttonClass.secondary}>
-                View decision log
-              </Link>
-            </div>
-          ) : null}
-        </Modal>
-      ) : null}
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt className="text-[#78716C]">Owner</dt>
+                  <dd className="font-semibold text-[#111827]">
+                    {memberName(members, selected?.memberId ?? selectedSpan?.assigneeId)}
+                  </dd>
+                </>
+              )}
 
-      {selectedSpan ? (
-        <Modal title={selectedSpan.title} onClose={() => setSelectedSpan(null)}>
-          <dl className="grid grid-cols-[150px_1fr] gap-y-1.5 text-sm">
-            <dt className="text-slate-500">Type</dt>
-            <dd>Confirmed task span</dd>
-            <dt className="text-slate-500">Assignee</dt>
-            <dd className="flex items-center gap-1.5">
-              <span className={`inline-block h-2.5 w-2.5 rounded-full ${memberDotClass(members, selectedSpan.assigneeId)}`} />
-              {memberName(members, selectedSpan.assigneeId)}
-            </dd>
-            <dt className="text-slate-500">Two-party confirmed</dt>
-            <dd>{formatDateTime(selectedSpan.confirmedAt)}</dd>
-            <dt className="text-slate-500">Deadline</dt>
-            <dd className="font-medium">⚑ {formatDateTime(selectedSpan.deadline)}</dd>
-            {spanTask ? (
+              {selected ? (
+                <>
+                  <dt className="text-[#78716C]">Time Slot</dt>
+                  <dd className="font-mono text-[#111827] tabular-nums">
+                    {formatDateTime(selected.start)} –{' '}
+                    {new Date(selected.end).toLocaleTimeString('en-US', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    })}
+                  </dd>
+                </>
+              ) : null}
+
+              {drawerTask ? (
+                <>
+                  <dt className="text-[#78716C]">Status</dt>
+                  <dd>
+                    <StatusPill status={drawerTask.status} />
+                  </dd>
+                  <dt className="text-[#78716C]">Deadline</dt>
+                  <dd className="font-mono font-semibold text-[#111827] tabular-nums">
+                    {formatDateTime(drawerTask.currentProposal.deadline)}
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+
+            {drawerTask ? (
               <>
-                <dt className="text-slate-500">Status</dt>
-                <dd>
-                  <StatusPill status={spanTask.status} />
-                </dd>
-                <dt className="text-slate-500">Version</dt>
-                <dd>
-                  {spanTask.confirmedVersion ? `Confirmed v${spanTask.confirmedVersion}` : 'Not confirmed'}
-                  {spanTask.currentProposal.version !== spanTask.confirmedVersion
-                    ? ` · current proposal v${spanTask.currentProposal.version}`
-                    : ''}
-                </dd>
+                <HandshakeStrip task={drawerTask} members={members} />
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href={`/?task=${encodeURIComponent(drawerTask.id)}`}
+                    className={buttonClass.primary}
+                  >
+                    Open Contract in Desk
+                  </Link>
+                  <Link href="/decisions" className={buttonClass.secondary}>
+                    Open Trust Ledger
+                  </Link>
+                </div>
+                <div className="rounded-xl border border-[#E5E2DC] bg-white p-3.5">
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-[#57534E]">
+                    Task Receipts ({drawerAudit.length})
+                  </p>
+                  <ReceiptRail entries={drawerAudit} members={members} />
+                </div>
               </>
             ) : null}
-          </dl>
-          <div className="mt-4 flex gap-2">
-            <Link href="/inbox" className={buttonClass.secondary}>
-              Open in Inbox
-            </Link>
-            <Link href="/decisions" className={buttonClass.secondary}>
-              View decision log
-            </Link>
           </div>
-        </Modal>
+        </Drawer>
       ) : null}
     </div>
   );

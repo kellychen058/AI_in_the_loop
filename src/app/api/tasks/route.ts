@@ -53,6 +53,8 @@ export async function PATCH(request: Request) {
     const task = await updateDraftTask({
       taskId: body.id as string,
       actorId: requireActorId(body.actorId),
+      expectedUpdatedAt:
+        typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined,
       title: body.title as string | undefined,
       description: body.description as string | undefined,
       sourceQuote: body.sourceQuote as string | undefined,

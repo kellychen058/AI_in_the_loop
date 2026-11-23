@@ -1,26 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
+import { useMemo, useState } from 'react';
 import type { AuditAction, AuditLogEntry, Task, TeamMember } from '@/lib/types';
-import { formatDateTime, inputClass, memberName } from './ui';
+import { ReceiptRail } from './ReceiptRail';
+import { formatDateTime, inputClass, memberName, StatusPill } from './ui';
 
-const ACTION_META: Record<AuditAction, { label: string; dot: string }> = {
-  meeting_ingested: { label: 'Meeting ingested', dot: 'bg-slate-400' },
-  task_drafted: { label: 'Task drafted', dot: 'bg-slate-500' },
-  task_proposed: { label: 'Proposed', dot: 'bg-sky-500' },
-  task_counter_proposed: { label: 'Counter-proposed', dot: 'bg-violet-500' },
-  task_rejected: { label: 'Rejected', dot: 'bg-rose-500' },
-  task_confirmed: { label: 'Confirmed', dot: 'bg-emerald-500' },
-  task_rescheduled: { label: 'Rescheduled', dot: 'bg-indigo-500' },
-  calendar_synced: { label: 'Calendar synced', dot: 'bg-teal-500' },
-  calendar_sync_failed: { label: 'Calendar sync failed', dot: 'bg-red-600' },
-  rejected_option_overridden: { label: 'Rejection overridden', dot: 'bg-amber-500' },
-  task_deleted: { label: 'Task deleted', dot: 'bg-slate-700' },
-  progress_checkin_configured: { label: 'Check-in configured', dot: 'bg-cyan-500' },
-  progress_checkin_submitted: { label: 'Check-in submitted', dot: 'bg-emerald-400' },
-  progress_checkin_reminded: { label: 'Check-in reminder', dot: 'bg-orange-500' },
-  progress_checkin_dismissed: { label: 'Check-in alert skipped', dot: 'bg-slate-400' },
-  demo_reset: { label: 'Demo reset', dot: 'bg-slate-300' },
+const ACTION_LABELS: Record<AuditAction, string> = {
+  meeting_ingested: 'Meeting ingested',
+  task_drafted: 'Task drafted',
+  task_proposed: 'Proposed',
+  task_counter_proposed: 'Counter-proposed',
+  task_rejected: 'Declined',
+  task_confirmed: 'Confirmed',
+  task_rescheduled: 'Rescheduled',
+  calendar_synced: 'Calendar synced',
+  calendar_sync_failed: 'Calendar sync failed',
+  rejected_option_overridden: 'Guard overridden',
+  task_deleted: 'Task deleted',
+  progress_checkin_configured: 'Check-in configured',
+  progress_checkin_submitted: 'Check-in submitted',
+  progress_checkin_reminded: 'Check-in reminder',
+  progress_checkin_dismissed: 'Check-in alert dismissed',
+  demo_reset: 'Demo reset',
 };
 
 export function AuditTimeline({
@@ -32,70 +34,157 @@ export function AuditTimeline({
   tasks: Task[];
   members: TeamMember[];
 }) {
+  const [viewMode, setViewMode] = useState<'grouped' | 'chronological'>('grouped');
   const [action, setAction] = useState<AuditAction | 'all'>('all');
   const [taskId, setTaskId] = useState<string>('all');
 
-  const taskTitles = new Map<string, string>();
-  for (const entry of auditLog) {
-    if (entry.taskId && !taskTitles.has(entry.taskId)) {
-      taskTitles.set(entry.taskId, tasks.find((t) => t.id === entry.taskId)?.title ?? entry.taskId);
+  const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks]);
+
+  const taskTitles = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of auditLog) {
+      if (entry.taskId && !map.has(entry.taskId)) {
+        map.set(entry.taskId, taskById.get(entry.taskId)?.title ?? `Historical (${entry.taskId})`);
+      }
     }
-  }
-  const entries = auditLog
-    .filter((e) => (action === 'all' || e.action === action) && (taskId === 'all' || e.taskId === taskId))
-    .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    return map;
+  }, [auditLog, taskById]);
+
+  const filtered = useMemo(
+    () =>
+      auditLog
+        .filter(
+          (e) =>
+            (action === 'all' || e.action === action) &&
+            (taskId === 'all' || e.taskId === taskId),
+        )
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp)),
+    [auditLog, action, taskId],
+  );
+
+  const groupedByTask = useMemo(() => {
+    const groups = new Map<string, AuditLogEntry[]>();
+    for (const entry of filtered) {
+      const key = entry.taskId ?? '__workspace__';
+      const list = groups.get(key) ?? [];
+      list.push(entry);
+      groups.set(key, list);
+    }
+    return [...groups.entries()];
+  }, [filtered]);
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
-        <select
-          aria-label="Filter by action"
-          className={`${inputClass} w-auto`}
-          value={action}
-          onChange={(e) => setAction(e.target.value as AuditAction | 'all')}
-        >
-          <option value="all">All actions</option>
-          {Object.entries(ACTION_META).map(([key, meta]) => (
-            <option key={key} value={key}>
-              {meta.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Filter by task"
-          className={`${inputClass} w-auto max-w-xs`}
-          value={taskId}
-          onChange={(e) => setTaskId(e.target.value)}
-        >
-          <option value="all">All tasks</option>
-          {[...taskTitles].map(([id, title]) => (
-            <option key={id} value={id}>
-              {title}
-            </option>
-          ))}
-        </select>
-        <span className="self-center text-xs text-slate-500">
-          {entries.length} of {auditLog.length} events
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded-lg border border-[#D1CCC2] bg-[#F7F6F2] p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('grouped')}
+              className={`rounded-md px-2.5 py-1 font-semibold ${
+                viewMode === 'grouped' ? 'bg-white text-[#111827] shadow-sm' : 'text-[#57534E]'
+              }`}
+            >
+              Grouped by Task
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('chronological')}
+              className={`rounded-md px-2.5 py-1 font-semibold ${
+                viewMode === 'chronological'
+                  ? 'bg-white text-[#111827] shadow-sm'
+                  : 'text-[#57534E]'
+              }`}
+            >
+              Chronological
+            </button>
+          </div>
+
+          <select
+            aria-label="Filter by action"
+            className={`${inputClass} w-auto py-1 text-xs`}
+            value={action}
+            onChange={(e) => setAction(e.target.value as AuditAction | 'all')}
+          >
+            <option value="all">All actions</option>
+            {Object.entries(ACTION_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>
+                {label}
+              </option>
+            ))}
+          </select>
+
+          <select
+            aria-label="Filter by task"
+            className={`${inputClass} w-auto max-w-xs py-1 text-xs`}
+            value={taskId}
+            onChange={(e) => setTaskId(e.target.value)}
+          >
+            <option value="all">All tasks</option>
+            {[...taskTitles].map(([id, title]) => (
+              <option key={id} value={id}>
+                {title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <span className="font-mono text-[11px] text-[#78716C] tabular-nums">
+          {filtered.length} of {auditLog.length} receipts
         </span>
       </div>
 
-      {entries.length === 0 ? <p className="text-sm text-slate-500">No events match these filters.</p> : null}
-      <ol className="relative space-y-3 border-l border-slate-200 pl-5">
-        {entries.map((entry) => {
-          const meta = ACTION_META[entry.action] ?? { label: entry.action, dot: 'bg-slate-400' };
-          return (
-            <li key={entry.id} className="relative">
-              <span className={`absolute -left-[26px] top-1 h-3 w-3 rounded-full ring-2 ring-white ${meta.dot}`} />
-              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                <span className="font-medium text-slate-700">{meta.label}</span>
-                <span>· {memberName(members, entry.actorId)}</span>
-                <span>· {formatDateTime(entry.timestamp)}</span>
+      {filtered.length === 0 ? (
+        <p className="text-xs text-[#78716C]">No receipts match these filters.</p>
+      ) : viewMode === 'grouped' ? (
+        <div className="space-y-3">
+          {groupedByTask.map(([key, entries]) => {
+            const liveTask = key !== '__workspace__' ? taskById.get(key) : undefined;
+            const heading =
+              key === '__workspace__'
+                ? 'Workspace & Meeting Intake Events'
+                : (liveTask?.title ?? `Historical Record (${key})`);
+            return (
+              <div
+                key={key}
+                className="rounded-lg border border-[#E5E2DC] bg-[#FAF9F6] p-3.5"
+              >
+                <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-[#E5E2DC] pb-2">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-bold text-[#111827]">{heading}</h3>
+                    {liveTask ? <StatusPill status={liveTask.status} /> : null}
+                  </div>
+                  {liveTask ? (
+                    <Link
+                      href={`/?task=${encodeURIComponent(liveTask.id)}`}
+                      className="text-[11px] font-semibold text-[#111827] underline"
+                    >
+                      Open Contract
+                    </Link>
+                  ) : null}
+                </div>
+                <ReceiptRail entries={entries} members={members} />
               </div>
-              <p className="text-sm text-slate-800">{entry.summary}</p>
+            );
+          })}
+        </div>
+      ) : (
+        <ol className="relative space-y-2.5 border-l border-[#E5E2DC] pl-4">
+          {filtered.map((entry) => (
+            <li key={entry.id} className="relative">
+              <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-[#111827] ring-2 ring-white" />
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[#78716C]">
+                <span className="font-semibold text-[#111827]">
+                  {ACTION_LABELS[entry.action] ?? entry.action}
+                </span>
+                <span>· {memberName(members, entry.actorId)}</span>
+                <span className="font-mono tabular-nums">· {formatDateTime(entry.timestamp)}</span>
+              </div>
+              <p className="text-xs text-[#57534E]">{entry.summary}</p>
             </li>
-          );
-        })}
-      </ol>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }

@@ -1,8 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { getWorkweekMonday } from '@/lib/seed';
 import type { ProposedBlock, TaskStatus, TeamMember, WorkloadStatus } from '@/lib/types';
+import { XIcon } from './Icons';
 
 export interface ApiResult<T> {
   ok: boolean;
@@ -93,51 +94,54 @@ export function hoursText(value: number): string {
 
 export const WORKLOAD_STYLES: Record<
   WorkloadStatus,
-  { label: string; bar: string; pill: string; border: string }
+  { label: string; bar: string; pill: string; border: string; text: string }
 > = {
   ok: {
-    label: 'OK',
-    bar: 'bg-emerald-500',
-    pill: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
-    border: 'border-emerald-200',
+    label: 'Healthy fit',
+    bar: 'bg-[#047857]',
+    pill: 'bg-[#ECFDF5] text-[#047857] ring-[#A7F3D0]',
+    border: 'border-[#A7F3D0]',
+    text: 'text-[#047857]',
   },
   near_capacity: {
     label: 'Near capacity',
-    bar: 'bg-amber-500',
-    pill: 'bg-amber-50 text-amber-800 ring-amber-200',
-    border: 'border-amber-200',
+    bar: 'bg-[#B45309]',
+    pill: 'bg-[#FFFBEB] text-[#B45309] ring-[#FDE68A]',
+    border: 'border-[#FDE68A]',
+    text: 'text-[#B45309]',
   },
   conflict: {
-    label: 'Conflict',
-    bar: 'bg-red-500',
-    pill: 'bg-red-50 text-red-700 ring-red-200',
-    border: 'border-red-200',
+    label: 'Over capacity',
+    bar: 'bg-[#BE123C]',
+    pill: 'bg-[#FFF1F2] text-[#BE123C] ring-[#FECDD3]',
+    border: 'border-[#FECDD3]',
+    text: 'text-[#BE123C]',
   },
 };
 
 const STATUS_STYLES: Record<TaskStatus, { label: string; className: string }> = {
-  draft: { label: 'Draft', className: 'bg-slate-100 text-slate-700' },
-  pending_assignee: { label: 'Pending assignee', className: 'bg-sky-50 text-sky-700' },
-  counter_proposed: { label: 'Counter-proposed', className: 'bg-violet-50 text-violet-700' },
-  rejected: { label: 'Declined', className: 'bg-rose-50 text-rose-700' },
-  confirmed: { label: 'Confirmed', className: 'bg-emerald-50 text-emerald-700' },
-  sync_failed: { label: 'Sync failed', className: 'bg-red-100 text-red-800' },
+  draft: { label: 'Draft', className: 'bg-[#F3F2ED] text-[#57534E] border border-[#E5E2DC]' },
+  pending_assignee: { label: 'Pending assignee', className: 'bg-[#EEF2FF] text-[#4338CA] border border-[#C7D2FE]' },
+  counter_proposed: { label: 'Counter-proposed', className: 'bg-[#FFFBEB] text-[#B45309] border border-[#FDE68A]' },
+  rejected: { label: 'Declined', className: 'bg-[#FFF1F2] text-[#BE123C] border border-[#FECDD3]' },
+  confirmed: { label: 'Confirmed', className: 'bg-[#ECFDF5] text-[#047857] border border-[#A7F3D0]' },
+  sync_failed: { label: 'Sync failed', className: 'bg-[#FFF1F2] text-[#BE123C] border border-[#BE123C]' },
 };
 
 export function StatusPill({ status }: { status: TaskStatus }) {
   const style = STATUS_STYLES[status];
   return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${style.className}`}>
+    <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-semibold ${style.className}`}>
       {style.label}
     </span>
   );
 }
 
 const BANNER_STYLES = {
-  info: 'border-sky-200 bg-sky-50 text-sky-800',
-  warning: 'border-amber-200 bg-amber-50 text-amber-900',
-  error: 'border-red-200 bg-red-50 text-red-800',
-  success: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  info: 'border-[#C7D2FE] bg-[#EEF2FF] text-[#312E81]',
+  warning: 'border-[#FDE68A] bg-[#FFFBEB] text-[#78350F]',
+  error: 'border-[#FECDD3] bg-[#FFF1F2] text-[#881337]',
+  success: 'border-[#A7F3D0] bg-[#ECFDF5] text-[#064E3B]',
 } as const;
 
 export function Banner({
@@ -152,15 +156,23 @@ export function Banner({
   onDismiss?: () => void;
 }) {
   return (
-    <div role={tone === 'error' ? 'alert' : 'status'} className={`rounded-lg border p-3 text-sm ${BANNER_STYLES[tone]}`}>
+    <div
+      role={tone === 'error' ? 'alert' : 'status'}
+      className={`rounded-lg border px-3.5 py-2.5 text-xs ${BANNER_STYLES[tone]}`}
+    >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 space-y-0.5">
           {title ? <p className="font-semibold">{title}</p> : null}
-          {children ? <div className="break-words">{children}</div> : null}
+          {children ? <div className="break-words opacity-90">{children}</div> : null}
         </div>
         {onDismiss ? (
-          <button type="button" onClick={onDismiss} className="text-xs font-medium opacity-70 hover:opacity-100">
-            Dismiss
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="shrink-0 rounded p-0.5 text-xs font-semibold opacity-70 hover:opacity-100"
+            aria-label="Dismiss message"
+          >
+            <XIcon className="h-3.5 w-3.5" />
           </button>
         ) : null}
       </div>
@@ -177,22 +189,35 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-4 sm:items-center"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-[#111827]/40 p-4 backdrop-blur-[1px] sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label={title}
       onClick={onClose}
     >
       <div
-        className="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl"
+        className="w-full max-w-lg rounded-xl border border-[#D1CCC2] bg-white p-5 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-slate-900">{title}</h2>
-          <button type="button" onClick={onClose} className="rounded px-2 py-1 text-sm text-slate-500 hover:bg-slate-100">
-            Close
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-[#E5E2DC] pb-3">
+          <h2 className="text-sm font-bold text-[#111827]">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-[#57534E] hover:bg-[#F7F6F2] hover:text-[#111827]"
+            aria-label="Close dialog"
+          >
+            <XIcon className="h-4 w-4" />
           </button>
         </div>
         {children}
@@ -201,16 +226,69 @@ export function Modal({
   );
 }
 
+export function Drawer({
+  title,
+  subtitle,
+  onClose,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-[#111827]/35 backdrop-blur-[1px]"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-full max-w-md flex-col border-l border-[#D1CCC2] bg-[#F7F6F2] shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-[#E5E2DC] bg-white px-5 py-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-bold text-[#111827]">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-xs text-[#57534E]">{subtitle}</p> : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-[#57534E] hover:bg-[#F7F6F2] hover:text-[#111827]"
+            aria-label="Close drawer"
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-5">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 export const inputClass =
-  'w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30';
+  'w-full rounded-lg border border-[#D1CCC2] bg-white px-3 py-1.5 text-sm text-[#111827] placeholder:text-[#78716C] focus:border-[#111827] focus:outline-none focus:ring-2 focus:ring-[#111827]/15';
 
 export const buttonClass = {
   primary:
-    'inline-flex items-center justify-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#111827] px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40',
+  emerald:
+    'inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#047857] px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40',
   secondary:
-    'inline-flex items-center justify-center gap-1.5 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#D1CCC2] bg-white px-3 py-1.5 text-xs font-semibold text-[#111827] shadow-sm transition-colors hover:bg-[#F7F6F2] disabled:cursor-not-allowed disabled:opacity-40',
   danger:
-    'inline-flex items-center justify-center gap-1.5 rounded-md border border-red-200 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50',
+    'inline-flex items-center justify-center gap-1.5 rounded-lg border border-[#FECDD3] bg-[#FFF1F2] px-3 py-1.5 text-xs font-semibold text-[#BE123C] transition-colors hover:bg-[#FFE4E6] disabled:cursor-not-allowed disabled:opacity-40',
 };
 
 export function Spinner() {

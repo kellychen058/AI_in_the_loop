@@ -5,9 +5,9 @@ import { hoursText } from './ui';
 import { memberDotClass } from './WeekCalendarGrid';
 
 const STATUS = {
-  ok: { label: 'OK', bar: 'bg-emerald-500', text: 'text-emerald-700' },
-  near: { label: 'Near Capacity', bar: 'bg-amber-500', text: 'text-amber-700' },
-  over: { label: 'Overloaded', bar: 'bg-red-500', text: 'text-red-700' },
+  ok: { label: 'Healthy', bar: 'bg-[#047857]', text: 'text-[#047857]' },
+  near: { label: 'Near cap', bar: 'bg-[#B45309]', text: 'text-[#B45309]' },
+  over: { label: 'Overloaded', bar: 'bg-[#BE123C]', text: 'text-[#BE123C]' },
 } as const;
 
 function hoursIn(events: CalendarEvent[], startMs: number, endMs: number): number {
@@ -23,52 +23,99 @@ export function MemberCapacitySidebar({
   events,
   weekStart,
   weekEnd,
+  selectedMemberId = 'all',
+  onSelectMember,
 }: {
   members: TeamMember[];
   events: CalendarEvent[];
   weekStart: Date;
   weekEnd: Date;
+  selectedMemberId?: string;
+  onSelectMember?: (memberId: string) => void;
 }) {
   return (
-    <aside className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div>
-        <h2 className="text-sm font-semibold text-slate-900">Weekly capacity</h2>
-        <p className="text-xs text-slate-500">Weekly hours − meetings − confirmed task blocks</p>
+    <aside className="space-y-3 rounded-xl border border-[#E5E2DC] bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#57534E]">
+            Team Capacity
+          </h2>
+          <p className="text-[11px] text-[#78716C]">Click a teammate to filter week</p>
+        </div>
+        {selectedMemberId !== 'all' && onSelectMember ? (
+          <button
+            type="button"
+            onClick={() => onSelectMember('all')}
+            className="text-[11px] font-semibold text-[#111827] underline"
+          >
+            All
+          </button>
+        ) : null}
       </div>
-      {members.map((member) => {
-        const mine = events.filter((e) => e.memberId === member.id);
-        const meetingHours = hoursIn(mine.filter((e) => e.kind === 'meeting'), weekStart.getTime(), weekEnd.getTime());
-        const taskHours = hoursIn(mine.filter((e) => e.kind === 'work_block'), weekStart.getTime(), weekEnd.getTime());
-        const remaining = member.weeklyHours - meetingHours - taskHours;
-        const status =
-          remaining < 0 ? STATUS.over : remaining / member.weeklyHours < 0.2 ? STATUS.near : STATUS.ok;
-        const pct = (value: number) => `${Math.min(100, (value / member.weeklyHours) * 100)}%`;
-        return (
-          <div key={member.id} className="space-y-1.5 border-t border-slate-100 pt-3 first:border-t-0 first:pt-0">
-            <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-1.5 text-sm font-medium text-slate-900">
-                <span className={`h-2.5 w-2.5 rounded-full ${memberDotClass(members, member.id)}`} />
-                {member.name}
-              </span>
-              <span className={`text-xs font-semibold ${status.text}`}>{status.label}</span>
-            </div>
-            <div className="flex h-2 overflow-hidden rounded-full bg-slate-100" role="img" aria-label={`${hoursText(remaining)} free of ${member.weeklyHours}h`}>
-              <div className="bg-slate-400" style={{ width: pct(meetingHours) }} />
-              <div className={status.bar} style={{ width: pct(taskHours) }} />
-            </div>
-            <dl className="grid grid-cols-2 gap-x-2 text-[11px] text-slate-600">
-              <dt>Weekly hours</dt>
-              <dd className="text-right">{hoursText(member.weeklyHours)}</dd>
-              <dt>Meetings</dt>
-              <dd className="text-right">{hoursText(meetingHours)}</dd>
-              <dt>Confirmed tasks</dt>
-              <dd className="text-right">{hoursText(taskHours)}</dd>
-              <dt className="font-semibold text-slate-800">Remaining</dt>
-              <dd className="text-right font-semibold text-slate-800">{hoursText(remaining)}</dd>
-            </dl>
-          </div>
-        );
-      })}
+
+      <div className="space-y-2">
+        {members.map((member) => {
+          const mine = events.filter((e) => e.memberId === member.id);
+          const meetingHours = hoursIn(
+            mine.filter((e) => e.kind === 'meeting'),
+            weekStart.getTime(),
+            weekEnd.getTime(),
+          );
+          const taskHours = hoursIn(
+            mine.filter((e) => e.kind === 'work_block'),
+            weekStart.getTime(),
+            weekEnd.getTime(),
+          );
+          const remaining = member.weeklyHours - meetingHours - taskHours;
+          const status =
+            remaining < 0
+              ? STATUS.over
+              : remaining / member.weeklyHours < 0.2
+                ? STATUS.near
+                : STATUS.ok;
+          const pct = (value: number) => `${Math.min(100, (value / member.weeklyHours) * 100)}%`;
+          const active = selectedMemberId === member.id;
+
+          return (
+            <button
+              key={member.id}
+              type="button"
+              onClick={() => onSelectMember?.(active ? 'all' : member.id)}
+              className={`block w-full rounded-lg border p-2.5 text-left transition-colors ${
+                active
+                  ? 'border-[#111827] bg-[#F7F6F2] ring-1 ring-[#111827]'
+                  : 'border-[#E5E2DC] bg-white hover:bg-[#FAF9F6]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-bold text-[#111827]">
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${memberDotClass(members, member.id)}`}
+                  />
+                  {member.name}
+                </span>
+                <span className={`font-mono text-[11px] font-bold tabular-nums ${status.text}`}>
+                  {hoursText(remaining)} / {member.weeklyHours}h
+                </span>
+              </div>
+              <div
+                className="my-1.5 flex h-1.5 overflow-hidden rounded-full bg-[#ECEAE4]"
+                role="img"
+                aria-label={`${hoursText(remaining)} free of ${member.weeklyHours}h`}
+              >
+                <div className="bg-[#A8A29E]" style={{ width: pct(meetingHours) }} />
+                <div className={status.bar} style={{ width: pct(taskHours) }} />
+              </div>
+              <div className="flex items-center justify-between font-mono text-[10px] text-[#57534E] tabular-nums">
+                <span>
+                  {hoursText(meetingHours)} mtgs · {hoursText(taskHours)} booked
+                </span>
+                <span className={status.text}>{status.label}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
     </aside>
   );
 }

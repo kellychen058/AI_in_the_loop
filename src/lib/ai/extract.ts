@@ -515,13 +515,14 @@ function parseSuggestionResponse(
 export async function suggestTaskAssignment(params: {
   db: AppDatabase;
   taskId?: string;
+  excludeMemberId?: string;
   title: string;
   description?: string;
   estimatedHours: number;
   deadline: string;
   now?: string;
 }): Promise<AssignmentSuggestion> {
-  const { db, taskId, title, description, estimatedHours, deadline } = params;
+  const { db, taskId, excludeMemberId, title, description, estimatedHours, deadline } = params;
   const workloads = checkAllMembersWorkload({
     db,
     deadline,
@@ -547,10 +548,12 @@ export async function suggestTaskAssignment(params: {
   const blockedRejections = rejectionStatus.filter((s) => s.applies).map((s) => s.rejection);
   const blockedIds = new Set(blockedRejections.map((rejection) => rejection.rejectedAssigneeId));
 
-  const candidates: Candidate[] = db.members.flatMap((member) => {
-    const workload = workloadById.get(member.id);
-    return workload ? [{ member, workload, blocked: blockedIds.has(member.id) }] : [];
-  });
+  const candidates: Candidate[] = db.members
+    .filter((member) => member.id !== excludeMemberId)
+    .flatMap((member) => {
+      const workload = workloadById.get(member.id);
+      return workload ? [{ member, workload, blocked: blockedIds.has(member.id) }] : [];
+    });
 
   const result = await callStructuredLLM({
     systemPrompt: SUGGESTION_SYSTEM_PROMPT,
