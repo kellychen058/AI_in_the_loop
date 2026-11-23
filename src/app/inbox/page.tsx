@@ -16,7 +16,13 @@ export default function InboxPage() {
       if (task.status === 'counter_proposed') {
         return task.currentProposal.proposedBy !== currentUser.id;
       }
-      return task.status === 'sync_failed';
+      if (task.status === 'sync_failed') {
+        return (
+          task.currentProposal.assigneeId === currentUser.id ||
+          task.currentProposal.proposedBy === currentUser.id
+        );
+      }
+      return false;
     }) ?? [];
 
   return (

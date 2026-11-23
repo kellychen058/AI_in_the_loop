@@ -27,7 +27,7 @@ Copy `.env.example` to `.env.local` manually and supply a provider key (`openai`
 
 ## Demo Flow & Zero-Login Persona Switcher
 
-Use the **Acting as** dropdown in the top navigation bar to switch personas instantly without logging in (persisted in `localStorage` and synced across tabs via `/api/state`):
+Use the **Acting as** dropdown in the top navigation bar to switch personas instantly without logging in (persisted in `localStorage` on load so you can keep two tabs on different personas for two-person testing, while shared tasks, meetings, and calendar state stay in sync across tabs via `/api/state`):
 
 - **Alice Chen (PM, 35h/wk):** Assigner pasting meeting notes, checking team capacity, and proposing tasks.
 - **Bob Lin (Designer, 30h/wk):** Light load with plenty of open capacity for design tasks.
