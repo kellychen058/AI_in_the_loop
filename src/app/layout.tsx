@@ -4,9 +4,9 @@ import { AppHeader } from '@/components/AppHeader';
 import { PersonaProvider } from '@/context/PersonaContext';
 
 export const metadata: Metadata = {
-  title: 'AI-in-the-Loop Planner',
+  title: 'The Living Handshake — AI-in-the-Loop Planner',
   description:
-    'Team meeting notes to task assignment, two-party confirmation, workload conflict checking, and shared calendar sync.',
+    'AI drafts in blueprint; two humans sign in ink; only then does the calendar lock open.',
 };
 
 export default function RootLayout({
@@ -16,10 +16,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900">
+      <body className="min-h-screen bg-[#F7F6F2] text-[#111827]">
         <PersonaProvider>
           <AppHeader />
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{children}</main>
+          <main className="mx-auto max-w-[1380px] px-4 py-5 sm:px-6">{children}</main>
         </PersonaProvider>
       </body>
     </html>

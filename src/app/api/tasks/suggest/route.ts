@@ -36,6 +36,10 @@ export async function POST(request: Request) {
     const suggestion = await suggestTaskAssignment({
       db,
       taskId: typeof body.taskId === 'string' && body.taskId ? body.taskId : undefined,
+      excludeMemberId:
+        typeof body.excludeMemberId === 'string' && body.excludeMemberId
+          ? body.excludeMemberId
+          : undefined,
       title,
       description: typeof body.description === 'string' ? body.description : undefined,
       estimatedHours,

@@ -7,14 +7,16 @@ import {
   computeCheckInRequestedAt,
   isCheckInDaysBefore,
 } from './checkIn';
+import { checkRejectedReproposal } from './rejectionGuard';
 import { readDb, updateDb } from './store';
 import { getAssignerId, isPm } from './taskRoles';
+
+export { checkRejectedReproposal };
 import type {
   AffectedDependentTask,
   AppDatabase,
   AuditLogEntry,
   CheckInDaysBefore,
-  RejectionCheckResult,
   RejectionRecord,
   Task,
   TaskProposal,
@@ -200,8 +202,12 @@ function buildProposal(params: {
     now,
     excludeTaskId: task.id,
   });
+  const maxVersion = Math.max(
+    task.currentProposal.version,
+    ...task.proposalHistory.map((p) => p.version),
+  );
   return {
-    version: task.currentProposal.version + 1,
+    version: maxVersion + 1,
     assigneeId: assignee.id,
     deadline,
     estimatedHours,
@@ -220,49 +226,6 @@ function applyProposal(task: Task, proposal: TaskProposal, status: TaskStatus): 
   task.proposalHistory.push(proposal);
   task.status = status;
   task.updatedAt = proposal.createdAt;
-}
-
-const normalizeTitle = (title: string) => title.trim().toLowerCase().replace(/\s+/g, ' ');
-
-export function checkRejectedReproposal(params: {
-  db: AppDatabase;
-  taskId: string;
-  taskTitle: string;
-  assigneeId: string;
-  deadline: string;
-  estimatedHours: number;
-  availableHours: number;
-  overrideRejectedReason?: string;
-}): RejectionCheckResult {
-  const title = normalizeTitle(params.taskTitle);
-  const matches = params.db.rejections.filter(
-    (r) =>
-      r.rejectedAssigneeId === params.assigneeId &&
-      (r.taskId === params.taskId || normalizeTitle(r.taskTitle) === title),
-  );
-  if (matches.length === 0) return { blocked: false };
-
-  const deadlineMs = Date.parse(params.deadline);
-  const unchanged = [...matches]
-    .reverse()
-    .find(
-      (r) =>
-        deadlineMs <= Date.parse(r.rejectedDeadline) &&
-        params.availableHours <= r.workloadSnapshot.availableHours &&
-        params.estimatedHours >= r.estimatedHours,
-    );
-  if (!unchanged) return { blocked: false, priorRejection: matches[matches.length - 1] };
-
-  if (params.overrideRejectedReason?.trim()) {
-    return { blocked: false, priorRejection: unchanged, overridden: true };
-  }
-  return {
-    blocked: true,
-    code: 'PREVIOUSLY_REJECTED',
-    message:
-      'This assignment was previously rejected under similar or tighter conditions. Provide a "What changed?" justification to proceed.',
-    priorRejection: unchanged,
-  };
 }
 
 export async function listTasks(params: {
@@ -343,6 +306,7 @@ export async function createDraftTask(params: {
 export async function updateDraftTask(params: {
   taskId: string;
   actorId?: string;
+  expectedUpdatedAt?: string;
   title?: string;
   description?: string;
   sourceQuote?: string;
@@ -361,6 +325,14 @@ export async function updateDraftTask(params: {
     }
     const task = requireTask(db, requireText(params.taskId, 'id'));
     requireStatus(task, ['draft'], 'edit');
+    if (params.expectedUpdatedAt && task.updatedAt !== params.expectedUpdatedAt) {
+      throw new WorkflowError(
+        409,
+        'STALE_DRAFT',
+        'Draft changed in another session; review latest terms before saving.',
+        { latestTask: structuredClone(task) },
+      );
+    }
     applyCheckInDays(task, optionalCheckInDays(params.checkInDaysBefore));
     if (params.title !== undefined) task.title = requireText(params.title, 'title');
     if (params.description !== undefined) {
@@ -399,8 +371,20 @@ export async function deleteDraftTask(params: {
     if (actor) requirePm(actor, 'delete tasks');
     const task = requireTask(db, requireText(params.taskId, 'id'));
     requireStatus(task, ['draft', 'rejected'], 'delete');
-    if (db.tasks.some((t) => t.dependsOnTaskIds.includes(task.id))) {
-      throw new WorkflowError(409, 'HAS_DEPENDENTS', 'Other tasks depend on this task.');
+    if (task.calendarEventIds.length > 0) {
+      throw new WorkflowError(
+        409,
+        'HAS_LIVE_BOOKING',
+        'This task still has live calendar blocks from a confirmed version and cannot be deleted directly.',
+      );
+    }
+    const dependentTaskIds = db.tasks
+      .filter((t) => t.dependsOnTaskIds.includes(task.id))
+      .map((t) => t.id);
+    if (dependentTaskIds.length > 0) {
+      throw new WorkflowError(409, 'HAS_DEPENDENTS', 'Other tasks depend on this task.', {
+        dependentTaskIds,
+      });
     }
     db.tasks = db.tasks.filter((t) => t.id !== task.id);
     if (task.status === 'rejected') {
@@ -420,6 +404,7 @@ export async function deleteDraftTask(params: {
 export async function proposeTask(params: {
   taskId: string;
   actorId: string;
+  expectedUpdatedAt?: string;
   assigneeId: string;
   deadline: string;
   estimatedHours: number;
@@ -437,6 +422,14 @@ export async function proposeTask(params: {
     const now = params.now ?? new Date().toISOString();
     const task = requireTask(db, params.taskId);
     requireStatus(task, ['draft', 'rejected'], 'propose');
+    if (params.expectedUpdatedAt && task.updatedAt !== params.expectedUpdatedAt) {
+      throw new WorkflowError(
+        409,
+        'STALE_DRAFT',
+        'Task changed in another session; review latest terms before submitting.',
+        { latestTask: structuredClone(task) },
+      );
+    }
     const actor = requireMember(db, params.actorId, 'actorId');
     requirePm(actor, 'assign tasks');
     const assignee = requireMember(db, params.assigneeId, 'assigneeId');

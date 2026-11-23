@@ -10,6 +10,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     return proposeTask({
       taskId: id,
       actorId: body.actorId as string,
+      expectedUpdatedAt:
+        typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined,
       assigneeId: body.assigneeId as string,
       deadline: body.deadline as string,
       estimatedHours: body.estimatedHours as number,
