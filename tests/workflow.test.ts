@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CalendarAdapter } from '@/lib/calendar/adapter';
+import { summarizeEvaluation } from '@/lib/evaluation';
 import { createSeedDatabase } from '@/lib/seed';
 import { readDb, writeDb } from '@/lib/store';
+import { getInboxSection } from '@/lib/taskRoles';
 import type { AppDatabase, ProposedBlock, RejectionRecord, Task } from '@/lib/types';
 import {
   checkRejectedReproposal,
@@ -239,6 +241,10 @@ describe('two-party confirmation state machine', () => {
       currentProposal: { version: 2, proposedBy: 'david', assigneeId: 'david', estimatedHours: 4 },
     });
     expect(countered.workload).toBeDefined();
+    const sections = (task: Task) =>
+      ['alice', 'david', 'carol'].map((id) => getInboxSection(task, id));
+    expect(sections(proposed)).toEqual(['waiting', 'action', undefined]);
+    expect(sections(countered.task)).toEqual(['action', 'waiting', undefined]);
 
     await expectWorkflowError(
       respondToProposal({
@@ -267,6 +273,7 @@ describe('two-party confirmation state machine', () => {
       status: 'pending_assignee',
       currentProposal: { version: 3, proposedBy: 'alice', estimatedHours: 4, deadline: THURSDAY },
     });
+    expect(sections(back.task)).toEqual(['waiting', 'action', undefined]);
 
     const reCounter = await respondToProposal({
       taskId: proposed.id,
@@ -298,6 +305,7 @@ describe('two-party confirmation state machine', () => {
       confirmedByAssignerAt: NOW,
       confirmedByAssigneeAt: reCounter.task.currentProposal.createdAt,
     });
+    expect(sections(task)).toEqual(['confirmed', 'confirmed', undefined]);
   });
 
   it('concurrent accepts of the same version sync once; the loser gets 409', async () => {
@@ -436,6 +444,12 @@ describe('rejection memory & re-proposal guard', () => {
     expect(override?.metadata).toMatchObject({
       priorRejectionId: db.rejections.at(-1)!.id,
       overrideRejectedReason: 'Carol took over the webhook tests, freeing David.',
+    });
+    expect(summarizeEvaluation(db)).toMatchObject({
+      rejections: 2,
+      overriddenRejections: 1,
+      activeRejectionBlocks: 1,
+      unapprovedCalendarBlocks: 0,
     });
   });
 

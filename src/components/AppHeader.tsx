@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { usePersona } from '@/context/PersonaContext';
+import { getInboxSection } from '@/lib/taskRoles';
 import type { Role } from '@/lib/types';
 
 const NAV_ITEMS = [
@@ -32,21 +33,7 @@ export function AppHeader() {
 
   const inboxActionCount = useMemo(() => {
     if (!db || !currentUser) return 0;
-    return db.tasks.filter((task) => {
-      if (task.status === 'pending_assignee') {
-        return task.currentProposal.assigneeId === currentUser.id;
-      }
-      if (task.status === 'counter_proposed') {
-        return task.currentProposal.proposedBy !== currentUser.id;
-      }
-      if (task.status === 'sync_failed') {
-        return (
-          task.currentProposal.assigneeId === currentUser.id ||
-          task.currentProposal.proposedBy === currentUser.id
-        );
-      }
-      return false;
-    }).length;
+    return db.tasks.filter((task) => getInboxSection(task, currentUser.id) === 'action').length;
   }, [db, currentUser]);
 
   return (

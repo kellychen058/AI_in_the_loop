@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { getCalendarAdapter, type CalendarAdapter } from './calendar/adapter';
 import { findWorkBlocks } from './calendar/scheduler';
 import { readDb, updateDb } from './store';
+import { getAssignerId } from './taskRoles';
 import type {
   AffectedDependentTask,
   AppDatabase,
@@ -119,15 +120,6 @@ function requireDependencies(db: AppDatabase, taskId: string, value: unknown): s
     }
   }
   return [...new Set(value as string[])];
-}
-
-/** The assigner is whoever last proposed this task to someone other than themselves. */
-export function getAssignerId(task: Task): string {
-  for (let i = task.proposalHistory.length - 1; i >= 0; i -= 1) {
-    const proposal = task.proposalHistory[i];
-    if (proposal.proposedBy !== proposal.assigneeId) return proposal.proposedBy;
-  }
-  return task.currentProposal.proposedBy;
 }
 
 function isConfirming(task: Task): boolean {
