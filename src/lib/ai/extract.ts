@@ -71,6 +71,14 @@ const EN_COMMITMENT = new RegExp(
 const ZH_VERB = new RegExp(`(${ZH_VERB_PATTERN})`);
 const ZH_COMMITMENT = new RegExp(`(?:請|需要|負責|要|將)[^。！？\\n]{0,12}(${ZH_VERB_PATTERN})`);
 
+// Lines that address the model instead of the team ("SYSTEM: ...", "ignore previous instructions").
+const INJECTION_LINE =
+  /^\s*(?:[-*•]\s*)?(?:system|assistant|developer|user)\s*[:：]|\b(?:ignore|disregard|forget)\b.{0,40}\b(?:instructions?|rules|prompts?)\b|(?:忽略|無視|无视).{0,10}(?:指令|指示|規則|规则)/i;
+
+function looksLikeInjection(text: string): boolean {
+  return INJECTION_LINE.test(text);
+}
+
 const LIST_MARKER = /^\s*(?:[-*•]\s+|\d+[.)]\s+|\d+、\s*)/;
 const ACTION_MARKER = /^\s*(?:action items?\s*#?\d*|todo|待辦(?:事項)?|行動項目)\s*[:：]\s*/i;
 const HOURS = /(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h|個?小時|小时)(?![a-z])/i;
@@ -104,25 +112,30 @@ export function inferRole(text: string): Role | undefined {
 }
 
 const EN_WEEKDAY =
-  /\b(next\s+)?(monday|tuesday|wednesday|thursday|friday|mon|tues?|wed|thu(?:rs?)?|fri)\b/i;
-const ZH_WEEKDAY = /(下)?(?:週|周|星期|禮拜|礼拜)([一二三四五])/;
+  /\b(next\s+)?(monday|tuesday|wednesday|thursday|friday|mon|tues?|wed|thu(?:rs?)?|fri)\b/gi;
+const ZH_WEEKDAY = /(下)?(?:週|周|星期|禮拜|礼拜)([一二三四五])/g;
 const EN_DAY_INDEX: Record<string, number> = { mon: 1, tue: 2, wed: 3, thu: 4, fri: 5 };
 const ZH_DAY_INDEX: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5 };
+// "from Friday to next Wednesday" / "從週五延到下週三": the last weekday is the new deadline.
+const RESCHEDULE_CUE =
+  /\bfrom\b.*\bto\b|\b(?:moved?|push(?:ed)?|postponed?|delay(?:ed)?)\b.*\bto\b|延到|延後到|延后到|改到|改成|移到|提前到/i;
 
 export function inferDeadline(text: string, now: Date): string | undefined {
-  let day: number | undefined;
-  let nextWeek = false;
-
-  const en = text.match(EN_WEEKDAY);
-  const zh = text.match(ZH_WEEKDAY);
-  if (en && (!zh || (en.index ?? 0) <= (zh.index ?? 0))) {
-    day = EN_DAY_INDEX[en[2].slice(0, 3).toLowerCase()];
-    nextWeek = Boolean(en[1]);
-  } else if (zh) {
-    day = ZH_DAY_INDEX[zh[2]];
-    nextWeek = Boolean(zh[1]);
-  }
-  if (!day) return undefined;
+  const mentions = [
+    ...[...text.matchAll(EN_WEEKDAY)].map((m) => ({
+      index: m.index ?? 0,
+      day: EN_DAY_INDEX[m[2].slice(0, 3).toLowerCase()],
+      nextWeek: Boolean(m[1]),
+    })),
+    ...[...text.matchAll(ZH_WEEKDAY)].map((m) => ({
+      index: m.index ?? 0,
+      day: ZH_DAY_INDEX[m[2]],
+      nextWeek: Boolean(m[1]),
+    })),
+  ].sort((a, b) => a.index - b.index);
+  const mention = RESCHEDULE_CUE.test(text) ? mentions.at(-1) : mentions[0];
+  if (!mention?.day) return undefined;
+  const { day, nextWeek } = mention;
 
   const deadline = getWorkweekMonday(now);
   deadline.setDate(deadline.getDate() + day - 1);
@@ -155,7 +168,7 @@ function collectCandidates(notes: string): NoteCandidate[] {
 
   for (const line of notes.split(/\r?\n/)) {
     const trimmedLine = line.trim();
-    if (!trimmedLine) continue;
+    if (!trimmedLine || looksLikeInjection(trimmedLine)) continue;
 
     const listMatch = trimmedLine.match(LIST_MARKER);
     const actionMatch = trimmedLine.match(ACTION_MARKER);
@@ -260,7 +273,12 @@ export function parseExtractionResponse(
     const record = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
     const title = nonEmptyString(record.title);
     const sourceQuote = nonEmptyString(record.sourceQuote);
-    if (!title || !sourceQuote || !notes.includes(sourceQuote)) {
+    if (
+      !title ||
+      !sourceQuote ||
+      !notes.includes(sourceQuote) ||
+      looksLikeInjection(sourceQuote)
+    ) {
       dropped += 1;
       continue;
     }
@@ -326,7 +344,7 @@ export async function extractTasksFromNotes(params: {
   if (result.warning) warnings.push(result.warning);
   if (dropped > 0) {
     warnings.push(
-      `${dropped} AI-extracted task(s) were dropped because their source quote was not found verbatim in the notes.`,
+      `${dropped} AI-extracted task(s) were dropped because their source quote was not found verbatim in the notes or looked like an embedded instruction.`,
     );
   }
   if (tasks.length === 0) warnings.push(NO_ACTIONABLE_TASKS_WARNING);
