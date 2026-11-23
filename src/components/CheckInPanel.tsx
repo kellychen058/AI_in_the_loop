@@ -65,7 +65,7 @@ export function CheckInPanel({
         {isAssigningPm ? (
           <select
             aria-label="Progress check-in schedule"
-            className={`${inputClass} w-auto py-1 text-xs`}
+            className={`${inputClass.replace(/\bw-full\b/, 'w-auto')} py-1 text-xs`}
             value={task.checkInDaysBefore?.toString() ?? ''}
             disabled={busy !== null}
             onChange={(e) => {
