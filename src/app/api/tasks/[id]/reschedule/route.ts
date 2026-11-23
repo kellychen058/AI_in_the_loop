@@ -1,3 +1,4 @@
+import type { CheckInDaysBefore } from '@/lib/types';
 import { readJsonBody, rescheduleTask, runWorkflowRoute } from '@/lib/workflow';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       newDeadline: body.newDeadline as string,
       newEstimatedHours: body.newEstimatedHours as number | undefined,
       note: body.note as string | undefined,
+      checkInDaysBefore: body.checkInDaysBefore as CheckInDaysBefore | null | undefined,
     });
   });
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CHECK_IN_DAY_OPTIONS, checkInDaysLabel, parseCheckInSelect } from '@/lib/checkIn';
 import type {
   AssignmentSuggestion,
   RejectionRecord,
@@ -62,6 +63,7 @@ export function TaskDraftCard({
     toDateInput(task.currentProposal.deadline || defaultDeadline()),
   );
   const [dependsOn, setDependsOn] = useState<string[]>(task.dependsOnTaskIds);
+  const [checkInInput, setCheckInInput] = useState(task.checkInDaysBefore?.toString() ?? '');
   const [suggestion, setSuggestion] = useState<AssignmentSuggestion | null>(null);
   const [guard, setGuard] = useState<Guard | null>(null);
   const [overrideReason, setOverrideReason] = useState('');
@@ -72,6 +74,7 @@ export function TaskDraftCard({
   const estimatedHours = Number(hours);
   const deadline = deadlineInput ? fromDateInput(deadlineInput) : '';
   const hoursValid = Number.isFinite(estimatedHours) && estimatedHours > 0;
+  const checkInDaysBefore = parseCheckInSelect(checkInInput);
   const lastRejection =
     task.status === 'rejected' ? rejections.filter((r) => r.taskId === task.id).at(-1) : undefined;
 
@@ -117,12 +120,14 @@ export function TaskDraftCard({
       method: 'PATCH',
       body: {
         id: task.id,
+        actorId: currentUserId,
         title,
         description,
         ...(hoursValid ? { estimatedHours } : {}),
         ...(assigneeId ? { assigneeId } : {}),
         ...(deadline ? { deadline } : {}),
         dependsOnTaskIds: dependsOn,
+        checkInDaysBefore,
       },
     });
     setBusy(null);
@@ -136,7 +141,8 @@ export function TaskDraftCard({
 
   async function remove() {
     setBusy('delete');
-    const result = await apiFetch(`/api/tasks?id=${encodeURIComponent(task.id)}`, {
+    const query = new URLSearchParams({ id: task.id, actorId: currentUserId });
+    const result = await apiFetch(`/api/tasks?${query}`, {
       method: 'DELETE',
     });
     setBusy(null);
@@ -172,6 +178,7 @@ export function TaskDraftCard({
         title,
         description,
         dependsOnTaskIds: dependsOn,
+        checkInDaysBefore,
         ...(guard ? { overrideRejectedReason: overrideReason.trim() } : {}),
       },
     });
@@ -283,6 +290,22 @@ export function TaskDraftCard({
           </label>
         </div>
 
+        <label className="block text-xs font-medium text-slate-600">
+          Progress check-in (one-sentence update from the assignee)
+          <select
+            className={`${inputClass} mt-1`}
+            value={checkInInput}
+            onChange={(e) => edit(setCheckInInput)(e.target.value)}
+          >
+            <option value="">None</option>
+            {CHECK_IN_DAY_OPTIONS.map((days) => (
+              <option key={days} value={days}>
+                {checkInDaysLabel(days)}
+              </option>
+            ))}
+          </select>
+        </label>
+
         {otherTasks.length > 0 ? (
           <label className="block text-xs font-medium text-slate-600">
             Depends on (optional, Ctrl/⌘-click for several)
@@ -314,9 +337,9 @@ export function TaskDraftCard({
             {busy === 'save' ? <Spinner /> : null} Save Draft
           </button>
         ) : null}
-        {isDraft ? (
+        {isDraft || task.status === 'rejected' ? (
           <button type="button" className={buttonClass.danger} onClick={remove} disabled={busy !== null}>
-            {busy === 'delete' ? <Spinner /> : null} Delete Draft
+            {busy === 'delete' ? <Spinner /> : null} {isDraft ? 'Delete Draft' : 'Delete Task'}
           </button>
         ) : null}
       </div>

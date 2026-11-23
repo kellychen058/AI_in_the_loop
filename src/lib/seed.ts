@@ -371,6 +371,12 @@ export function createSeedDatabase(referenceDate: Date = new Date()): AppDatabas
       confirmedByAssignerAt: workweekTime(monday, 0, 9, 20),
       confirmedByAssigneeAt: workweekTime(monday, 0, 9, 30),
       calendarEventIds: ['evt-wb-carol-1', 'evt-wb-carol-2'],
+      checkInDaysBefore: 2,
+      progressCheckIn: {
+        daysBeforeDeadline: 2,
+        requestedAt: workweekTime(monday, 0, 9, 30),
+        reminders: [],
+      },
       createdAt: workweekTime(monday, 0, 9, 20),
       updatedAt: workweekTime(monday, 0, 9, 30),
     },

@@ -48,6 +48,29 @@ export interface TaskProposal {
   createdAt: string;
 }
 
+export type CheckInDaysBefore = 0 | 1 | 2;
+
+export interface ProgressCheckInResponse {
+  message: string;
+  submittedBy: string;
+  submittedAt: string;
+}
+
+export interface ProgressCheckInReminder {
+  id: string;
+  sentBy: string;
+  sentAt: string;
+  note?: string;
+}
+
+export interface ProgressCheckIn {
+  daysBeforeDeadline: CheckInDaysBefore;
+  requestedAt: string;
+  response?: ProgressCheckInResponse;
+  reminders: ProgressCheckInReminder[];
+  dismissedAlertAt?: string;
+}
+
 export interface Task {
   id: string;
   meetingId: string;
@@ -66,6 +89,8 @@ export interface Task {
   confirmedByAssigneeAt?: string;
   calendarEventIds: string[];
   syncError?: string;
+  checkInDaysBefore?: CheckInDaysBefore;
+  progressCheckIn?: ProgressCheckIn;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +145,11 @@ export type AuditAction =
   | 'calendar_synced'
   | 'calendar_sync_failed'
   | 'rejected_option_overridden'
+  | 'task_deleted'
+  | 'progress_checkin_configured'
+  | 'progress_checkin_submitted'
+  | 'progress_checkin_reminded'
+  | 'progress_checkin_dismissed'
   | 'demo_reset';
 
 export interface AuditLogEntry {

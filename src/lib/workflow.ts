@@ -1,12 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { getCalendarAdapter, type CalendarAdapter } from './calendar/adapter';
 import { findWorkBlocks } from './calendar/scheduler';
+import {
+  CHECK_IN_MAX_LENGTH,
+  checkInDaysLabel,
+  computeCheckInRequestedAt,
+  isCheckInDaysBefore,
+} from './checkIn';
 import { readDb, updateDb } from './store';
-import { getAssignerId } from './taskRoles';
+import { getAssignerId, isPm } from './taskRoles';
 import type {
   AffectedDependentTask,
   AppDatabase,
   AuditLogEntry,
+  CheckInDaysBefore,
   RejectionCheckResult,
   RejectionRecord,
   Task,
@@ -92,6 +99,23 @@ function requireMember(db: AppDatabase, id: unknown, field: string): TeamMember 
   const member = db.members.find((m) => m.id === memberId);
   if (!member) throw badInput(`Unknown team member "${memberId}" for "${field}".`);
   return member;
+}
+
+function requirePm(member: TeamMember, operation: string): void {
+  if (!isPm(member)) {
+    throw new WorkflowError(403, 'PM_ONLY', `Only a PM can ${operation}.`);
+  }
+}
+
+function optionalCheckInDays(value: unknown): CheckInDaysBefore | null | undefined {
+  if (value === undefined || value === null) return value;
+  if (!isCheckInDaysBefore(value)) throw badInput('"checkInDaysBefore" must be 0, 1, 2 or null.');
+  return value;
+}
+
+function applyCheckInDays(task: Task, value: CheckInDaysBefore | null | undefined): void {
+  if (value === null) delete task.checkInDaysBefore;
+  else if (value !== undefined) task.checkInDaysBefore = value;
 }
 
 function requireTask(db: AppDatabase, taskId: string): Task {
@@ -264,6 +288,7 @@ export async function createDraftTask(params: {
   assigneeId?: string;
   deadline?: string;
   dependsOnTaskIds?: string[];
+  checkInDaysBefore?: CheckInDaysBefore | null;
   now?: string;
   dbPath?: string;
 }): Promise<Task> {
@@ -271,6 +296,8 @@ export async function createDraftTask(params: {
   await updateDb((db) => {
     const now = params.now ?? new Date().toISOString();
     const actor = requireMember(db, params.actorId, 'actorId');
+    requirePm(actor, 'create tasks');
+    const checkInDaysBefore = optionalCheckInDays(params.checkInDaysBefore);
     const id = `task-${randomUUID()}`;
     const task: Task = {
       id,
@@ -296,6 +323,7 @@ export async function createDraftTask(params: {
       },
       proposalHistory: [],
       calendarEventIds: [],
+      ...(typeof checkInDaysBefore === 'number' ? { checkInDaysBefore } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -314,6 +342,7 @@ export async function createDraftTask(params: {
 
 export async function updateDraftTask(params: {
   taskId: string;
+  actorId?: string;
   title?: string;
   description?: string;
   sourceQuote?: string;
@@ -321,13 +350,18 @@ export async function updateDraftTask(params: {
   assigneeId?: string;
   deadline?: string;
   dependsOnTaskIds?: string[];
+  checkInDaysBefore?: CheckInDaysBefore | null;
   now?: string;
   dbPath?: string;
 }): Promise<Task> {
   let updated: Task | undefined;
   await updateDb((db) => {
+    if (params.actorId !== undefined) {
+      requirePm(requireMember(db, params.actorId, 'actorId'), 'edit tasks');
+    }
     const task = requireTask(db, requireText(params.taskId, 'id'));
     requireStatus(task, ['draft'], 'edit');
+    applyCheckInDays(task, optionalCheckInDays(params.checkInDaysBefore));
     if (params.title !== undefined) task.title = requireText(params.title, 'title');
     if (params.description !== undefined) {
       task.description = optionalText(params.description, 'description') ?? '';
@@ -353,14 +387,33 @@ export async function updateDraftTask(params: {
   return updated!;
 }
 
-export async function deleteDraftTask(params: { taskId: string; dbPath?: string }): Promise<void> {
+export async function deleteDraftTask(params: {
+  taskId: string;
+  actorId?: string;
+  now?: string;
+  dbPath?: string;
+}): Promise<void> {
   await updateDb((db) => {
+    const actor =
+      params.actorId === undefined ? undefined : requireMember(db, params.actorId, 'actorId');
+    if (actor) requirePm(actor, 'delete tasks');
     const task = requireTask(db, requireText(params.taskId, 'id'));
-    requireStatus(task, ['draft'], 'delete');
+    requireStatus(task, ['draft', 'rejected'], 'delete');
     if (db.tasks.some((t) => t.dependsOnTaskIds.includes(task.id))) {
-      throw new WorkflowError(409, 'HAS_DEPENDENTS', 'Other tasks depend on this draft.');
+      throw new WorkflowError(409, 'HAS_DEPENDENTS', 'Other tasks depend on this task.');
     }
     db.tasks = db.tasks.filter((t) => t.id !== task.id);
+    if (task.status === 'rejected') {
+      const actorId = actor?.id ?? getAssignerId(task);
+      appendAudit(db, {
+        timestamp: params.now ?? new Date().toISOString(),
+        actorId,
+        action: 'task_deleted',
+        taskId: task.id,
+        summary: `${memberName(db, actorId)} deleted declined task "${task.title}".`,
+        metadata: { version: task.currentProposal.version },
+      });
+    }
   }, params.dbPath);
 }
 
@@ -375,6 +428,7 @@ export async function proposeTask(params: {
   title?: string;
   description?: string;
   dependsOnTaskIds?: string[];
+  checkInDaysBefore?: CheckInDaysBefore | null;
   now?: string;
   dbPath?: string;
 }): Promise<{ task: Task; workload: WorkloadBreakdown }> {
@@ -384,7 +438,9 @@ export async function proposeTask(params: {
     const task = requireTask(db, params.taskId);
     requireStatus(task, ['draft', 'rejected'], 'propose');
     const actor = requireMember(db, params.actorId, 'actorId');
+    requirePm(actor, 'assign tasks');
     const assignee = requireMember(db, params.assigneeId, 'assigneeId');
+    const checkInDaysBefore = optionalCheckInDays(params.checkInDaysBefore);
     if (actor.id === assignee.id) {
       throw badInput('The assigner and assignee must be different people.');
     }
@@ -418,6 +474,7 @@ export async function proposeTask(params: {
     if (params.dependsOnTaskIds !== undefined) {
       task.dependsOnTaskIds = requireDependencies(db, task.id, params.dependsOnTaskIds);
     }
+    applyCheckInDays(task, checkInDaysBefore);
     const proposal = buildProposal({
       db,
       task,
@@ -514,6 +571,13 @@ export async function respondToProposal(params: {
       task.confirmedVersion = proposal.version;
       task.confirmedByAssigneeAt = accepterIsAssignee ? now : proposal.createdAt;
       task.confirmedByAssignerAt = accepterIsAssignee ? proposal.createdAt : now;
+      if (task.checkInDaysBefore !== undefined) {
+        task.progressCheckIn = {
+          daysBeforeDeadline: task.checkInDaysBefore,
+          requestedAt: computeCheckInRequestedAt(proposal.deadline, task.checkInDaysBefore, now),
+          reminders: [],
+        };
+      }
       task.updatedAt = now;
       appendAudit(db, {
         timestamp: now,
@@ -658,6 +722,7 @@ export async function rescheduleTask(params: {
   newDeadline: string;
   newEstimatedHours?: number;
   note?: string;
+  checkInDaysBefore?: CheckInDaysBefore | null;
   now?: string;
   dbPath?: string;
 }): Promise<{
@@ -673,6 +738,7 @@ export async function rescheduleTask(params: {
     const task = requireTask(db, params.taskId);
     requireStatus(task, ['confirmed', 'sync_failed'], 'reschedule');
     const actor = requireMember(db, params.actorId, 'actorId');
+    requirePm(actor, 'reschedule tasks');
     const assignerId = getAssignerId(task);
     if (actor.id !== assignerId) {
       throw new WorkflowError(
@@ -694,6 +760,7 @@ export async function rescheduleTask(params: {
       params.newEstimatedHours === undefined
         ? previous.estimatedHours
         : requireHours(params.newEstimatedHours, 'newEstimatedHours');
+    const checkInDaysBefore = optionalCheckInDays(params.checkInDaysBefore);
 
     const workload = computeWorkload(db, task, assignee, deadline, estimatedHours, now);
     const affectedDependents = findAffectedDependentTasks({
@@ -713,6 +780,8 @@ export async function rescheduleTask(params: {
     });
     applyProposal(task, proposal, 'pending_assignee');
     delete task.syncError;
+    delete task.progressCheckIn;
+    applyCheckInDays(task, checkInDaysBefore);
 
     appendAudit(db, {
       timestamp: now,
@@ -728,6 +797,170 @@ export async function rescheduleTask(params: {
       },
     });
     result = { task, workload, affectedDependents };
+  }, params.dbPath);
+  return result!;
+}
+
+function requireCheckInTask(
+  db: AppDatabase,
+  taskId: string,
+  actorId: string,
+  role: 'assigner' | 'assignee',
+): { task: Task; actor: TeamMember } {
+  const task = requireTask(db, taskId);
+  const actor = requireMember(db, actorId, 'actorId');
+  if (role === 'assigner') {
+    requirePm(actor, 'manage progress check-ins');
+    if (actor.id !== getAssignerId(task)) {
+      throw new WorkflowError(403, 'NOT_ASSIGNER', 'Only the assigning PM can manage this check-in.');
+    }
+  } else if (actor.id !== task.currentProposal.assigneeId) {
+    throw new WorkflowError(403, 'NOT_ASSIGNEE', 'Only the assignee can report progress.');
+  }
+  requireStatus(task, ['confirmed'], 'update the progress check-in of');
+  return { task, actor };
+}
+
+function requireOpenCheckIn(task: Task) {
+  const checkIn = task.progressCheckIn;
+  if (!checkIn) throw new WorkflowError(409, 'NO_CHECK_IN', 'This task has no progress check-in.');
+  if (checkIn.response) {
+    throw new WorkflowError(409, 'CHECK_IN_SUBMITTED', 'Progress was already reported.');
+  }
+  return checkIn;
+}
+
+export async function configureProgressCheckIn(params: {
+  taskId: string;
+  actorId: string;
+  daysBeforeDeadline: CheckInDaysBefore | null;
+  now?: string;
+  dbPath?: string;
+}): Promise<{ task: Task }> {
+  let result: { task: Task } | undefined;
+  await updateDb((db) => {
+    const now = params.now ?? new Date().toISOString();
+    const { task, actor } = requireCheckInTask(db, params.taskId, params.actorId, 'assigner');
+    if (params.daysBeforeDeadline !== null && !isCheckInDaysBefore(params.daysBeforeDeadline)) {
+      throw badInput('"daysBeforeDeadline" must be 0, 1, 2 or null.');
+    }
+    const days = params.daysBeforeDeadline;
+    if (days === null) {
+      delete task.checkInDaysBefore;
+      delete task.progressCheckIn;
+    } else {
+      task.checkInDaysBefore = days;
+      task.progressCheckIn = {
+        daysBeforeDeadline: days,
+        requestedAt: computeCheckInRequestedAt(task.currentProposal.deadline, days, now),
+        reminders: [],
+      };
+    }
+    task.updatedAt = now;
+    appendAudit(db, {
+      timestamp: now,
+      actorId: actor.id,
+      action: 'progress_checkin_configured',
+      taskId: task.id,
+      summary:
+        days === null
+          ? `${actor.name} turned off the progress check-in for "${task.title}".`
+          : `${actor.name} set a progress check-in for "${task.title}": ${checkInDaysLabel(days)}.`,
+      metadata: { daysBeforeDeadline: days, requestedAt: task.progressCheckIn?.requestedAt },
+    });
+    result = { task };
+  }, params.dbPath);
+  return result!;
+}
+
+export async function submitProgressCheckIn(params: {
+  taskId: string;
+  actorId: string;
+  message: string;
+  now?: string;
+  dbPath?: string;
+}): Promise<{ task: Task }> {
+  let result: { task: Task } | undefined;
+  await updateDb((db) => {
+    const now = params.now ?? new Date().toISOString();
+    const { task, actor } = requireCheckInTask(db, params.taskId, params.actorId, 'assignee');
+    const checkIn = requireOpenCheckIn(task);
+    const message = requireText(params.message, 'message');
+    if (/[\r\n]/.test(message) || message.length > CHECK_IN_MAX_LENGTH) {
+      throw badInput(`"message" must be one sentence on a single line (max ${CHECK_IN_MAX_LENGTH} characters).`);
+    }
+    checkIn.response = { message, submittedBy: actor.id, submittedAt: now };
+    task.updatedAt = now;
+    appendAudit(db, {
+      timestamp: now,
+      actorId: actor.id,
+      action: 'progress_checkin_submitted',
+      taskId: task.id,
+      summary: `${actor.name} reported progress on "${task.title}": ${message}`,
+    });
+    result = { task };
+  }, params.dbPath);
+  return result!;
+}
+
+export async function remindProgressCheckIn(params: {
+  taskId: string;
+  actorId: string;
+  note?: string;
+  now?: string;
+  dbPath?: string;
+}): Promise<{ task: Task }> {
+  let result: { task: Task } | undefined;
+  await updateDb((db) => {
+    const now = params.now ?? new Date().toISOString();
+    const { task, actor } = requireCheckInTask(db, params.taskId, params.actorId, 'assigner');
+    const checkIn = requireOpenCheckIn(task);
+    if (Date.parse(now) < Date.parse(checkIn.requestedAt)) {
+      throw new WorkflowError(409, 'CHECK_IN_NOT_STARTED', 'The check-in has not been requested yet.');
+    }
+    const note = optionalText(params.note, 'note');
+    checkIn.reminders.push({
+      id: `rem-${randomUUID()}`,
+      sentBy: actor.id,
+      sentAt: now,
+      ...(note ? { note } : {}),
+    });
+    delete checkIn.dismissedAlertAt;
+    task.updatedAt = now;
+    appendAudit(db, {
+      timestamp: now,
+      actorId: actor.id,
+      action: 'progress_checkin_reminded',
+      taskId: task.id,
+      summary: `${actor.name} reminded ${memberName(db, task.currentProposal.assigneeId)} to report progress on "${task.title}"${note ? `: ${note}` : '.'}`,
+      metadata: { reminderCount: checkIn.reminders.length },
+    });
+    result = { task };
+  }, params.dbPath);
+  return result!;
+}
+
+export async function dismissProgressCheckInAlert(params: {
+  taskId: string;
+  actorId: string;
+  now?: string;
+  dbPath?: string;
+}): Promise<{ task: Task }> {
+  let result: { task: Task } | undefined;
+  await updateDb((db) => {
+    const now = params.now ?? new Date().toISOString();
+    const { task, actor } = requireCheckInTask(db, params.taskId, params.actorId, 'assigner');
+    const checkIn = requireOpenCheckIn(task);
+    checkIn.dismissedAlertAt = now;
+    task.updatedAt = now;
+    appendAudit(db, {
+      timestamp: now,
+      actorId: actor.id,
+      action: 'progress_checkin_dismissed',
+      taskId: task.id,
+      summary: `${actor.name} chose not to send another check-in reminder for "${task.title}".`,
+    });
+    result = { task };
   }, params.dbPath);
   return result!;
 }

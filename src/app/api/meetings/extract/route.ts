@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { defaultDraftDeadline, EMPTY_INPUT_MESSAGE, extractTasksFromNotes } from '@/lib/ai/extract';
 import { readDb, updateDb } from '@/lib/store';
+import { isPm } from '@/lib/taskRoles';
 import type { AuditLogEntry, MeetingSession, Task } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -28,8 +29,15 @@ export async function POST(request: Request) {
 
   try {
     const db = await readDb();
-    if (!db.members.some((member) => member.id === actorId)) {
+    const actor = db.members.find((member) => member.id === actorId);
+    if (!actor) {
       return badRequest('UNKNOWN_ACTOR', 'actorId must match a team member.');
+    }
+    if (!isPm(actor)) {
+      return NextResponse.json(
+        { code: 'PM_ONLY', message: 'Only a PM can extract tasks from meeting notes.' },
+        { status: 403 },
+      );
     }
 
     const extraction = await extractTasksFromNotes({ title, rawNotes, actorId });
