@@ -1,16 +1,31 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { MeetingIngestPanel } from '@/components/MeetingIngestPanel';
 import { TaskDraftCard } from '@/components/TaskDraftCard';
 import { Banner, buttonClass } from '@/components/ui';
 import { usePersona } from '@/context/PersonaContext';
-import { getAssignerId } from '@/lib/taskRoles';
+import { getAssignerId, isPm } from '@/lib/taskRoles';
 
 export default function WorkspacePage() {
   const { db, loading, error, currentUser, refreshDb } = usePersona();
   const [toast, setToast] = useState<string | null>(null);
+  const router = useRouter();
+  const nonPm = currentUser !== null && !isPm(currentUser);
+
+  useEffect(() => {
+    if (nonPm) router.replace('/inbox');
+  }, [nonPm, router]);
+
+  if (nonPm) {
+    return (
+      <p className="py-12 text-center text-sm text-slate-500">
+        Only PMs can assign tasks. Taking you to your inbox…
+      </p>
+    );
+  }
 
   const tasks = db?.tasks ?? [];
   const drafts = tasks

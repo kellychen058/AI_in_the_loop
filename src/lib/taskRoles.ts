@@ -1,4 +1,9 @@
-import type { Task } from './types';
+import { getCheckInStatus } from './checkIn';
+import type { Task, TeamMember } from './types';
+
+export function isPm(member: Pick<TeamMember, 'role'> | null | undefined): boolean {
+  return member?.role === 'pm';
+}
 
 /** The assigner is whoever last proposed this task to someone other than themselves. */
 export function getAssignerId(task: Task): string {
@@ -18,11 +23,21 @@ export function getResponderId(task: Task): string | undefined {
 
 export type InboxSection = 'action' | 'waiting' | 'confirmed';
 
-export function getInboxSection(task: Task, userId: string): InboxSection | undefined {
+export function getInboxSection(
+  task: Task,
+  userId: string,
+  now?: string,
+): InboxSection | undefined {
   const isAssignee = task.currentProposal.assigneeId === userId;
   const isAssigner = getAssignerId(task) === userId;
+  if (task.status === 'rejected') return isAssigner ? 'action' : undefined;
   if (task.status === 'sync_failed') return isAssignee || isAssigner ? 'action' : undefined;
-  if (task.status === 'confirmed') return isAssignee || isAssigner ? 'confirmed' : undefined;
+  if (task.status === 'confirmed') {
+    const checkIn = getCheckInStatus(task, now);
+    if (isAssignee && checkIn.needsAssigneeAction) return 'action';
+    if (isAssigner && checkIn.needsPmAlert) return 'action';
+    return isAssignee || isAssigner ? 'confirmed' : undefined;
+  }
   const responderId = getResponderId(task);
   if (!responderId) return undefined;
   if (responderId === userId) return 'action';

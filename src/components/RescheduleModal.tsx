@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { CHECK_IN_DAY_OPTIONS, checkInDaysLabel, parseCheckInSelect } from '@/lib/checkIn';
 import type { Task, TeamMember } from '@/lib/types';
 import {
   apiFetch,
@@ -34,6 +35,7 @@ export function RescheduleModal({
   const [deadlineInput, setDeadlineInput] = useState(toDateInput(proposal.deadline));
   const [hours, setHours] = useState(String(proposal.estimatedHours));
   const [note, setNote] = useState('');
+  const [checkInInput, setCheckInInput] = useState(task.checkInDaysBefore?.toString() ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,6 +53,7 @@ export function RescheduleModal({
         newDeadline: deadline,
         newEstimatedHours: estimatedHours,
         note,
+        checkInDaysBefore: parseCheckInSelect(checkInInput),
       },
     });
     setBusy(false);
@@ -98,6 +101,21 @@ export function RescheduleModal({
             />
           </label>
         </div>
+        <label className="block text-xs font-medium text-slate-600">
+          Progress check-in
+          <select
+            className={`${inputClass} mt-1`}
+            value={checkInInput}
+            onChange={(e) => setCheckInInput(e.target.value)}
+          >
+            <option value="">None</option>
+            {CHECK_IN_DAY_OPTIONS.map((days) => (
+              <option key={days} value={days}>
+                {checkInDaysLabel(days)}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="block text-xs font-medium text-slate-600">
           Reason
           <textarea className={`${inputClass} mt-1`} rows={2} value={note} onChange={(e) => setNote(e.target.value)} />

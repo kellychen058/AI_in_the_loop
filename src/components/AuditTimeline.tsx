@@ -15,6 +15,11 @@ const ACTION_META: Record<AuditAction, { label: string; dot: string }> = {
   calendar_synced: { label: 'Calendar synced', dot: 'bg-teal-500' },
   calendar_sync_failed: { label: 'Calendar sync failed', dot: 'bg-red-600' },
   rejected_option_overridden: { label: 'Rejection overridden', dot: 'bg-amber-500' },
+  task_deleted: { label: 'Task deleted', dot: 'bg-slate-700' },
+  progress_checkin_configured: { label: 'Check-in configured', dot: 'bg-cyan-500' },
+  progress_checkin_submitted: { label: 'Check-in submitted', dot: 'bg-emerald-400' },
+  progress_checkin_reminded: { label: 'Check-in reminder', dot: 'bg-orange-500' },
+  progress_checkin_dismissed: { label: 'Check-in alert skipped', dot: 'bg-slate-400' },
   demo_reset: { label: 'Demo reset', dot: 'bg-slate-300' },
 };
 

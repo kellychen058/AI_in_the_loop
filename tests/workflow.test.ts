@@ -500,7 +500,7 @@ describe('reschedule flow', () => {
     await expectWorkflowError(
       rescheduleTask({ taskId: oauth.id, actorId: 'carol', newDeadline, dbPath }),
       403,
-      'NOT_ASSIGNER',
+      'PM_ONLY',
     );
 
     const result = await rescheduleTask({

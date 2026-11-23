@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMemo } from 'react';
 import { usePersona } from '@/context/PersonaContext';
-import { getInboxSection } from '@/lib/taskRoles';
+import { getInboxSection, isPm } from '@/lib/taskRoles';
 import type { Role } from '@/lib/types';
 
 const NAV_ITEMS = [
@@ -35,12 +35,14 @@ export function AppHeader() {
     if (!db || !currentUser) return 0;
     return db.tasks.filter((task) => getInboxSection(task, currentUser.id) === 'action').length;
   }, [db, currentUser]);
+  const hideWorkspace = currentUser !== null && !isPm(currentUser);
+  const navItems = hideWorkspace ? NAV_ITEMS.filter((item) => item.href !== '/') : NAV_ITEMS;
 
   return (
     <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex items-center gap-6">
-          <Link href="/" className="flex items-center gap-2.5">
+          <Link href={hideWorkspace ? '/inbox' : '/'} className="flex items-center gap-2.5">
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600 text-sm font-bold text-white shadow-sm">
               AI
             </span>
@@ -55,7 +57,7 @@ export function AppHeader() {
           </Link>
 
           <nav aria-label="Primary navigation" className="flex items-center gap-1">
-            {NAV_ITEMS.map((item) => {
+            {navItems.map((item) => {
               const isActive =
                 item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
               return (

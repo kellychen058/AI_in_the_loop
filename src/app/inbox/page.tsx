@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { ProposalCard } from '@/components/ProposalCard';
 import { Banner, buttonClass } from '@/components/ui';
 import { usePersona } from '@/context/PersonaContext';
-import { getInboxSection, type InboxSection } from '@/lib/taskRoles';
+import { getCheckInStatus } from '@/lib/checkIn';
+import { getAssignerId, getInboxSection, isPm, type InboxSection } from '@/lib/taskRoles';
 import type { Task } from '@/lib/types';
 
 const SECTIONS: { key: InboxSection; title: string; empty: string }[] = [
@@ -18,9 +19,16 @@ export default function InboxPage() {
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
 
   const grouped: Record<InboxSection, Task[]> = { action: [], waiting: [], confirmed: [] };
+  const now = new Date().toISOString();
+  const pmTasks =
+    db && currentUser && isPm(currentUser)
+      ? db.tasks.filter((task) => getAssignerId(task) === currentUser.id)
+      : [];
+  const declinedCount = pmTasks.filter((task) => task.status === 'rejected').length;
+  const overdueCheckIns = pmTasks.filter((task) => getCheckInStatus(task, now).needsPmAlert).length;
   if (db && currentUser) {
     for (const task of db.tasks) {
-      const section = getInboxSection(task, currentUser.id);
+      const section = getInboxSection(task, currentUser.id, now);
       if (section) grouped[section].push(task);
     }
     for (const list of Object.values(grouped)) {
@@ -54,6 +62,16 @@ export default function InboxPage() {
           {toast.message}
         </Banner>
       ) : null}
+      {declinedCount > 0 ? (
+        <Banner tone="error" title={`${declinedCount} declined task${declinedCount === 1 ? '' : 's'} need${declinedCount === 1 ? 's' : ''} your decision`}>
+          Reassign each to someone else or delete it — see Needs Your Action below.
+        </Banner>
+      ) : null}
+      {overdueCheckIns > 0 ? (
+        <Banner tone="warning" title={`${overdueCheckIns} progress check-in${overdueCheckIns === 1 ? '' : 's'} unanswered for over 12h`}>
+          Decide whether to send another reminder — see Needs Your Action below.
+        </Banner>
+      ) : null}
       {db?.settings.simulateCalendarFailure ? (
         <Banner tone="warning" title="Calendar sync failure simulation is ON">
           Accepting a task will fail to sync until it is turned off on the Calendar page.
@@ -84,6 +102,8 @@ export default function InboxPage() {
                     task={task}
                     section={key}
                     members={db?.members ?? []}
+                    allTasks={db?.tasks ?? []}
+                    rejections={db?.rejections ?? []}
                     currentUserId={currentUser.id}
                     onDone={handleDone}
                   />

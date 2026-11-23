@@ -1,10 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import { CheckInPanel } from './CheckInPanel';
 import type { InboxSection } from '@/lib/taskRoles';
-import { getAssignerId, getResponderId } from '@/lib/taskRoles';
-import type { Task, TeamMember } from '@/lib/types';
+import { getAssignerId, getResponderId, isPm } from '@/lib/taskRoles';
+import type { RejectionRecord, Task, TeamMember } from '@/lib/types';
 import { CounterProposeModal } from './CounterProposeModal';
+import { ReassignModal } from './ReassignModal';
 import { RescheduleModal } from './RescheduleModal';
 import {
   apiFetch,
@@ -32,22 +34,30 @@ export function ProposalCard({
   task,
   section,
   members,
+  allTasks,
+  rejections,
   currentUserId,
   onDone,
 }: {
   task: Task;
   section: InboxSection;
   members: TeamMember[];
+  allTasks: Task[];
+  rejections: RejectionRecord[];
   currentUserId: string;
   onDone: (message: string, tone?: 'success' | 'error') => Promise<void>;
 }) {
   const proposal = task.currentProposal;
   const assignerId = getAssignerId(task);
   const canRespond = getResponderId(task) === currentUserId;
-  const [modal, setModal] = useState<null | 'counter' | 'reschedule'>(null);
+  const isAssigningPm = assignerId === currentUserId && isPm(members.find((m) => m.id === currentUserId));
+  const lastRejection =
+    task.status === 'rejected' ? rejections.filter((r) => r.taskId === task.id).at(-1) : undefined;
+  const [modal, setModal] = useState<null | 'counter' | 'reschedule' | 'reassign'>(null);
   const [declineOpen, setDeclineOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [reason, setReason] = useState('');
-  const [busy, setBusy] = useState<null | 'accept' | 'decline' | 'retry'>(null);
+  const [busy, setBusy] = useState<null | 'accept' | 'decline' | 'retry' | 'delete'>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function respond(action: 'accept' | 'decline') {
@@ -97,6 +107,19 @@ export function ProposalCard({
     await onDone(`Synced ${result.data.task.calendarEventIds.length} work block(s) for "${task.title}".`);
   }
 
+  async function deleteTask() {
+    setBusy('delete');
+    setError(null);
+    const query = new URLSearchParams({ id: task.id, actorId: currentUserId });
+    const result = await apiFetch(`/api/tasks?${query}`, { method: 'DELETE' });
+    setBusy(null);
+    if (!result.ok) {
+      setError(errorText(result));
+      return;
+    }
+    await onDone(`Deleted "${task.title}". The decline stays in /decisions.`);
+  }
+
   const scheduled = blockHours(task);
   const unscheduled = Math.max(0, proposal.estimatedHours - scheduled);
   const isCommitted = task.status === 'confirmed';
@@ -143,6 +166,40 @@ export function ProposalCard({
         </p>
       ) : null}
 
+      {task.status === 'rejected' && isAssigningPm ? (
+        <div className="mt-3 rounded-lg border-2 border-rose-300 bg-rose-50 p-3 text-sm text-rose-950" role="alert">
+          <p className="font-semibold">
+            ✕ {memberName(members, lastRejection?.rejectedBy ?? proposal.assigneeId)} declined this task
+            {lastRejection ? ` on ${formatDateTime(lastRejection.createdAt)}` : ''}
+          </p>
+          {lastRejection ? (
+            <blockquote className="mt-1 border-l-2 border-rose-300 pl-2 text-xs italic">
+              “{lastRejection.reason}”
+            </blockquote>
+          ) : null}
+          <p className="mt-1 text-xs">Reassign it to someone else, or delete it.</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className={buttonClass.primary} onClick={() => setModal('reassign')} disabled={busy !== null}>
+              Reassign to Someone Else
+            </button>
+            {confirmDelete ? (
+              <>
+                <button type="button" className={buttonClass.danger} onClick={deleteTask} disabled={busy !== null}>
+                  {busy === 'delete' ? <Spinner /> : null} Confirm Delete
+                </button>
+                <button type="button" className={buttonClass.secondary} onClick={() => setConfirmDelete(false)} disabled={busy !== null}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button type="button" className={buttonClass.danger} onClick={() => setConfirmDelete(true)} disabled={busy !== null}>
+                Delete Task
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
+
       {task.status === 'sync_failed' ? (
         <div className="mt-3">
           <Banner tone="error" title="Calendar sync failed — confirmed, but not on the calendar yet">
@@ -177,7 +234,7 @@ export function ProposalCard({
         ) : null}
       </div>
 
-      {section !== 'confirmed' && task.status !== 'sync_failed' ? (
+      {!isCommitted && task.status !== 'sync_failed' && task.status !== 'rejected' ? (
         <div className="mt-3">
           <WorkloadMeter
             members={members}
@@ -187,6 +244,10 @@ export function ProposalCard({
             excludeTaskId={task.id}
           />
         </div>
+      ) : null}
+
+      {isCommitted ? (
+        <CheckInPanel task={task} members={members} currentUserId={currentUserId} isAssigningPm={isAssigningPm} onDone={onDone} />
       ) : null}
 
       {task.proposalHistory.length > 0 ? (
@@ -238,7 +299,7 @@ export function ProposalCard({
             {busy === 'retry' ? <Spinner /> : '↻'} Retry Calendar Sync
           </button>
         ) : null}
-        {isCommitted && assignerId === currentUserId ? (
+        {isCommitted && isAssigningPm ? (
           <button type="button" className={buttonClass.secondary} onClick={() => setModal('reschedule')}>
             Reschedule
           </button>
@@ -271,6 +332,20 @@ export function ProposalCard({
         <CounterProposeModal
           task={task}
           members={members}
+          currentUserId={currentUserId}
+          onClose={() => setModal(null)}
+          onDone={async (message) => {
+            setModal(null);
+            await onDone(message);
+          }}
+        />
+      ) : null}
+      {modal === 'reassign' ? (
+        <ReassignModal
+          task={task}
+          members={members}
+          allTasks={allTasks}
+          rejections={rejections}
           currentUserId={currentUserId}
           onClose={() => setModal(null)}
           onDone={async (message) => {
