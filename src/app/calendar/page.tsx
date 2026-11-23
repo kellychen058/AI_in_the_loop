@@ -4,18 +4,27 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { MemberCapacitySidebar } from '@/components/MemberCapacitySidebar';
 import { Banner, buttonClass, errorText, formatDateTime, apiFetch, memberName, Modal, StatusPill } from '@/components/ui';
-import { WeekCalendarGrid, type GridEvent } from '@/components/WeekCalendarGrid';
+import {
+  memberColorIndex,
+  memberDotClass,
+  OTHER_MEETING_COLOR,
+  OWN_MEETING_COLORS,
+  WeekCalendarGrid,
+  type GridEvent,
+  type TaskSpan,
+} from '@/components/WeekCalendarGrid';
 import { usePersona } from '@/context/PersonaContext';
 import { getWorkweekMonday } from '@/lib/seed';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function CalendarPage() {
-  const { db, error, refreshDb } = usePersona();
+  const { db, error, refreshDb, currentUser } = usePersona();
   const [memberFilter, setMemberFilter] = useState<string>('all');
   const [weekOffset, setWeekOffset] = useState(0);
   const [showPreviews, setShowPreviews] = useState(false);
   const [selected, setSelected] = useState<GridEvent | null>(null);
+  const [selectedSpan, setSelectedSpan] = useState<TaskSpan | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
   const [toggling, setToggling] = useState(false);
 
@@ -68,6 +77,8 @@ export default function CalendarPage() {
   const exportHref =
     memberFilter === 'all' ? '/api/calendar/export' : `/api/calendar/export?memberId=${encodeURIComponent(memberFilter)}`;
   const selectedTask = selected?.taskId ? db?.tasks.find((t) => t.id === selected.taskId) : undefined;
+  const spanTask = selectedSpan ? db?.tasks.find((t) => t.id === selectedSpan.taskId) : undefined;
+  const ownColor = currentUser ? memberColorIndex(members, currentUser.id) : 0;
 
   return (
     <div className="space-y-4">
@@ -150,28 +161,40 @@ export default function CalendarPage() {
 
       {db ? (
         <>
-          <p className="text-xs text-slate-500">
-            Week of {monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })} ·{' '}
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3 rounded-sm border border-slate-300 bg-slate-200" /> meeting
-            </span>{' '}
-            ·{' '}
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3 rounded-sm bg-indigo-600" /> confirmed work block
-            </span>{' '}
-            ·{' '}
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-2.5 w-3 rounded-sm border-2 border-dashed border-indigo-500" /> pending
-              preview (not on calendar)
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+            <span>
+              Week of {monday.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
             </span>
-          </p>
+            <span className="inline-flex items-center gap-1">
+              <span className={`inline-block h-3 w-4 rounded-sm border ${OWN_MEETING_COLORS[ownColor]}`} /> your meeting
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className={`inline-block h-3 w-4 rounded-sm border ${OTHER_MEETING_COLOR}`} /> other meeting
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className={`inline-block h-3 w-4 rounded-sm ${currentUser ? memberDotClass(members, currentUser.id) : 'bg-indigo-600'}`} />{' '}
+              confirmed work block
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-3 w-4 rounded-sm border-2 border-dashed border-slate-500" /> pending preview (not on
+              calendar)
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-flex h-3 w-8 items-center justify-end rounded-sm border border-slate-400 border-r-4 border-r-slate-700 bg-slate-100" />
+              <span className="rounded bg-slate-700 px-1 text-[10px] font-bold text-white">⚑ 18:00</span> confirmed task span +
+              deadline
+            </span>
+          </div>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
             <WeekCalendarGrid
               monday={monday}
               members={members}
               visibleMemberIds={visibleMemberIds}
               events={events}
+              tasks={db.tasks}
+              currentUserId={currentUser?.id}
               onSelect={setSelected}
+              onSelectSpan={setSelectedSpan}
             />
             <MemberCapacitySidebar members={members} events={db.calendarEvents} weekStart={monday} weekEnd={weekEnd} />
           </div>
@@ -191,8 +214,27 @@ export default function CalendarPage() {
                   ? 'Confirmed task work block'
                   : 'Pending preview — not written to the calendar yet'}
             </dd>
-            <dt className="text-slate-500">Member</dt>
-            <dd>{memberName(members, selected.memberId)}</dd>
+            {selected.kind === 'meeting' ? (
+              <>
+                <dt className="text-slate-500">Attendees ({(selected.attendeeIds ?? [selected.memberId]).length})</dt>
+                <dd>
+                  <ul className="space-y-0.5">
+                    {(selected.attendeeIds ?? [selected.memberId]).map((id) => (
+                      <li key={id} className="flex items-center gap-1.5">
+                        <span className={`inline-block h-2.5 w-2.5 rounded-full ${memberDotClass(members, id)}`} />
+                        {memberName(members, id)}
+                        {id === currentUser?.id ? <span className="text-xs text-slate-500">(you)</span> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </dd>
+              </>
+            ) : (
+              <>
+                <dt className="text-slate-500">Member</dt>
+                <dd>{memberName(members, selected.memberId)}</dd>
+              </>
+            )}
             <dt className="text-slate-500">Time</dt>
             <dd>
               {formatDateTime(selected.start)} – {new Date(selected.end).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -229,6 +271,47 @@ export default function CalendarPage() {
               </Link>
             </div>
           ) : null}
+        </Modal>
+      ) : null}
+
+      {selectedSpan ? (
+        <Modal title={selectedSpan.title} onClose={() => setSelectedSpan(null)}>
+          <dl className="grid grid-cols-[150px_1fr] gap-y-1.5 text-sm">
+            <dt className="text-slate-500">Type</dt>
+            <dd>Confirmed task span</dd>
+            <dt className="text-slate-500">Assignee</dt>
+            <dd className="flex items-center gap-1.5">
+              <span className={`inline-block h-2.5 w-2.5 rounded-full ${memberDotClass(members, selectedSpan.assigneeId)}`} />
+              {memberName(members, selectedSpan.assigneeId)}
+            </dd>
+            <dt className="text-slate-500">Two-party confirmed</dt>
+            <dd>{formatDateTime(selectedSpan.confirmedAt)}</dd>
+            <dt className="text-slate-500">Deadline</dt>
+            <dd className="font-medium">⚑ {formatDateTime(selectedSpan.deadline)}</dd>
+            {spanTask ? (
+              <>
+                <dt className="text-slate-500">Status</dt>
+                <dd>
+                  <StatusPill status={spanTask.status} />
+                </dd>
+                <dt className="text-slate-500">Version</dt>
+                <dd>
+                  {spanTask.confirmedVersion ? `Confirmed v${spanTask.confirmedVersion}` : 'Not confirmed'}
+                  {spanTask.currentProposal.version !== spanTask.confirmedVersion
+                    ? ` · current proposal v${spanTask.currentProposal.version}`
+                    : ''}
+                </dd>
+              </>
+            ) : null}
+          </dl>
+          <div className="mt-4 flex gap-2">
+            <Link href="/inbox" className={buttonClass.secondary}>
+              Open in Inbox
+            </Link>
+            <Link href="/decisions" className={buttonClass.secondary}>
+              View decision log
+            </Link>
+          </div>
         </Modal>
       ) : null}
     </div>
