@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Local runtime JSON store (auto-seeded from src/lib/seed.ts)
+data/db.json
+data/*.tmp
+
+# Local environment secrets (humans only — NEVER commit)
+.env.local
+.env*.local
+
+# Testing & TypeScript
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# OS artifacts
+.DS_Store
+Thumbs.db
