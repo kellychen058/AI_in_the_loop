@@ -1,18 +1,28 @@
-## What this PR does
-<!-- Summarize the change in 1-3 concise bullet points and reference any closed issue (e.g., Closes #7). -->
+## What and why
+<!-- One or two sentences. Link the issue or DECISIONS.md entry. -->
 
-## What AI did & how it was verified
-<!-- Describe which parts were drafted with AI assistance, what humans reviewed/edited, and how the changes were verified against repo guidelines (AI-usage-guildline.md). -->
+## AI assistance
+- Tool and model: <!-- none / Claude Code / chat / ... -->
+- What it generated: <!-- files or functions -->
+- Instruction given: <!-- one-line summary; link the prompt or spec if long -->
+- What I changed afterwards, and why:
 
-## Decision (if any)
-<!-- Required if a significant architectural or product choice was made; mirror important team decisions in DECISIONS.md. -->
-- Decision:
-- Why:
-- Alternative rejected:
-- Led by:
+## How I checked it
+- [ ] I read every line of this change myself and can explain it without the AI
+- [ ] Tests added or updated, and all tests pass locally (and in CI, if we have it)
+- [ ] Prompt changed? Before/after results from our prompt test suite are below
+- Other checks (manual tries, screenshots):
 
-## Test evidence
-<!-- Paste or summarize output of `npm test` and `npm run build`, plus manual verification notes. -->
-- [ ] `npm test` passes
-- [ ] `npm run build` passes
-- [ ] No secrets or `.env.local` committed
+## Risks and alternatives
+<!-- What could break; what I considered and rejected. -->
+
+## Review evidence and decision record
+- Tested commit:
+- Check executor (human / agent), commands and pass/fail/skip counts:
+- Manual scenario: action → expected → observed:
+- Evidence mode (mock/fallback, mocked provider, live provider; date/model for live):
+- Known limitations / untested behavior:
+- Decision and steward-handoff link (or N/A with reason):
+- [ ] A human finalized the description and removed placeholders; decision lead is identified where applicable.
+- [ ] A non-author reviewer explained the main behavior and left a substantive review comment.
+<!-- Do not check human-review boxes on behalf of someone else or treat model scores as human review. -->
